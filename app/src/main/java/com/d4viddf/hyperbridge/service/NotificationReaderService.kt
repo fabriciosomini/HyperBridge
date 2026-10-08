@@ -2818,6 +2818,7 @@ class NotificationReaderService : NotificationListenerService() {
         if (::vpnIslandController.isInitialized) vpnIslandController.stop()
         if (::chargingIslandController.isInitialized) chargingIslandController.stop()
         if (::debuggingIslandController.isInitialized) debuggingIslandController.stop()
+        if (::permanentIslandManager.isInitialized) permanentIslandManager.stop()
         unregisterReceiver(systemReceiver)
         unregisterReceiver(islandClickReceiver)
         syncJob?.cancel()
