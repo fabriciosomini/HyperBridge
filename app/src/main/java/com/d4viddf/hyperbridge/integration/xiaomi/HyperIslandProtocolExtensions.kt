@@ -5,10 +5,11 @@ import com.google.gson.JsonParser
 import io.github.d4viddf.hyperisland_kit.HyperIslandNotification
 
 /**
- * `islandProperty` value that SystemUI exempts from hiding islands on the keyguard, so the pill
- * keeps drawing at the cutout while locked (found in #267, verified on HyperOS 4). It only
- * takes effect when the island is added while the screen is on, and such islands get no row in
- * the notification shade.
+ * `islandProperty` value that MIUISystemUIPlugin exempts from its SCREEN_LOCKED temp-hide, so the
+ * pill keeps drawing at the cutout while locked (found in #267, verified on HyperOS 4; HyperOS 3
+ * is unverified). It only takes effect when the island is added while the screen is on. Side
+ * effects: the plugin forces `isShowNotification=false`, so such islands get no row in the
+ * notification shade, and it removes them at lock time when AOD is on but not full-screen AOD.
  */
 const val KEYGUARD_ISLAND_PROPERTY = 0
 

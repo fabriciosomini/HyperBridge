@@ -1,8 +1,11 @@
 package com.d4viddf.hyperbridge.service
 
 import android.Manifest
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
@@ -13,6 +16,9 @@ import com.d4viddf.hyperbridge.data.widget.DeviceVariables
 import com.d4viddf.hyperbridge.data.widget.SourceRepository
 import com.d4viddf.hyperbridge.data.widget.VariableContext
 import com.d4viddf.hyperbridge.data.widget.WidgetVariableEngine
+import com.d4viddf.hyperbridge.integration.xiaomi.HyperIslandProtocolOptions
+import com.d4viddf.hyperbridge.integration.xiaomi.KEYGUARD_ISLAND_PROPERTY
+import com.d4viddf.hyperbridge.integration.xiaomi.buildJsonParam
 import com.d4viddf.hyperbridge.models.HyperIslandData
 import com.d4viddf.hyperbridge.models.widget.CustomWidgetDocument
 import com.d4viddf.hyperbridge.service.widget.CustomWidgetRenderer
@@ -52,6 +58,8 @@ class PermanentIslandManager(
     private var hasNativeIsland = false
     private var currentWidth = 0
     private var isHideInLandscapeEnabled = false
+    private var showOnLockscreen = false
+    private var isKeyguardLocked = false
     private var pendingDispatchJob: Job? = null
 
     // --- Custom micro-widget on the permanent island (#273 "island content sources") ---
@@ -61,7 +69,40 @@ class PermanentIslandManager(
     private var currentCustomWidgetId: String? = null
     private var currentCustomWidgetDoc: CustomWidgetDocument? = null
 
+    private val keyguardManager = context.getSystemService(KeyguardManager::class.java)
+
+    // KeyguardLockedStateListener needs the privileged SUBSCRIBE_TO_KEYGUARD_LOCKED_STATE, so lock
+    // state is re-queried on SCREEN_ON / USER_PRESENT instead. SCREEN_OFF is deliberately ignored:
+    // an island added while the screen is off keeps a hidden view after wake (neither an in-place
+    // update nor leaving it alone brings it back), so the keyguard pill is posted on SCREEN_ON.
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val locked = keyguardManager?.isKeyguardLocked == true
+            synchronized(this@PermanentIslandManager) {
+                if (isKeyguardLocked == locked) return
+                isKeyguardLocked = locked
+                if (locked && !isIslandActive && desiredActive()) {
+                    // Nothing was cancelled just before, so skip the anti-swallow delay: the pill
+                    // should be there as the keyguard fades in, not 0.7 s later.
+                    val jobToCancel = pendingDispatchJob
+                    pendingDispatchJob = null
+                    jobToCancel?.cancel()
+                    isIslandActive = true
+                    dispatchPermanentIsland()
+                } else {
+                    updateStateLocked()
+                }
+            }
+        }
+    }
+
     init {
+        isKeyguardLocked = keyguardManager?.isKeyguardLocked == true
+        context.registerReceiver(screenReceiver, IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
+        })
+
         scope.launch {
             preferences.permanentIslandWidgetIdFlow.collectLatest { widgetId ->
                 currentCustomWidgetId = widgetId
@@ -112,6 +153,23 @@ class PermanentIslandManager(
                 }
             }
         }
+        scope.launch {
+            preferences.permanentIslandOnLockscreenFlow.collectLatest { show ->
+                synchronized(this@PermanentIslandManager) {
+                    if (showOnLockscreen != show) {
+                        showOnLockscreen = show
+                        // HyperOS only gives property-0 islands the keyguard-surviving "show once"
+                        // slot when they are added; an in-place update keeps the old slot, so
+                        // re-post from scratch.
+                        if (isIslandActive) {
+                            removePermanentIsland()
+                            scheduleDispatchLocked()
+                        }
+                        updateStateLocked()
+                    }
+                }
+            }
+        }
     }
 
     @Synchronized
@@ -146,8 +204,13 @@ class PermanentIslandManager(
             realNotificationCount = currentRealNotifications,
             hasNativeIsland = hasNativeIsland,
             hideInLandscape = isHideInLandscapeEnabled,
-            isLandscape = isLandscape
+            isLandscape = isLandscape,
+            keepOnKeyguard = showOnLockscreen && isKeyguardLocked
         )
+    }
+
+    fun stop() {
+        runCatching { context.unregisterReceiver(screenReceiver) }
     }
 
     @Synchronized
@@ -252,7 +315,12 @@ class PermanentIslandManager(
             }
 
             val resourceBundle = if (widgetDoc != null) builder.buildCustomExtras() else builder.buildResourceBundle()
-            val data = HyperIslandData(resourceBundle, builder.buildJsonParam())
+            // Property 0 keeps HyperOS drawing the pill over the keyguard; 1 is the toolkit default.
+            val islandProperty = if (showOnLockscreen) KEYGUARD_ISLAND_PROPERTY else 1
+            val data = HyperIslandData(
+                resourceBundle,
+                builder.buildJsonParam(HyperIslandProtocolOptions(islandProperty = islandProperty))
+            )
 
             val notifBuilder = NotificationCompat.Builder(context, "hyper_bridge_notification_channel")
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
