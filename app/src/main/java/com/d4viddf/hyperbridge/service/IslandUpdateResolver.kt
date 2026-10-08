@@ -172,10 +172,13 @@ object PermanentIslandVisibilityPolicy {
         realNotificationCount: Int,
         hasNativeIsland: Boolean,
         hideInLandscape: Boolean,
-        isLandscape: Boolean
+        isLandscape: Boolean,
+        // Locked with "Show on Lock Screen" on: HyperOS hides every other island at the cutout on
+        // the keyguard (they render as cards below the clock), so yielding would only leave the
+        // cutout empty. Unlocked, the yield stays — two pills would collide there (#335).
+        keepOnKeyguard: Boolean = false
     ): Boolean = enabled &&
-            realNotificationCount == 0 &&
-            !hasNativeIsland &&
+            (keepOnKeyguard || (realNotificationCount == 0 && !hasNativeIsland)) &&
             !(hideInLandscape && isLandscape)
 }
 
