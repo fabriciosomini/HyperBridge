@@ -317,6 +317,16 @@ class IslandUpdateResolverTest {
         assertFalse(PermanentIslandVisibilityPolicy.desiredActive(false, 0, false, false, false))
     }
 
+    @Test
+    fun permanentIslandHoldsTheCutoutOnTheKeyguardWhileOtherIslandsRun() {
+        // HyperOS hides other islands at the cutout on the keyguard, so yielding leaves it empty.
+        assertTrue(PermanentIslandVisibilityPolicy.desiredActive(true, 1, false, false, false, keepOnKeyguard = true))
+        assertTrue(PermanentIslandVisibilityPolicy.desiredActive(true, 0, true, false, false, keepOnKeyguard = true))
+        // Still disabled, and still respects the landscape preference.
+        assertFalse(PermanentIslandVisibilityPolicy.desiredActive(false, 0, false, false, false, keepOnKeyguard = true))
+        assertFalse(PermanentIslandVisibilityPolicy.desiredActive(true, 1, false, true, true, keepOnKeyguard = true))
+    }
+
     private fun messageEvent(timestamp: Long, messageCount: Int): MessageEventFingerprint {
         return MessageEventFingerprint(
             source = MessageEventFingerprintSource.MESSAGING_STYLE,
