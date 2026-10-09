@@ -23,7 +23,7 @@ class NativeIslandTracker(
     // window (timezone change, manual edit, NTP) would stretch or cut it short.
     private val clock: () -> Long = SystemClock::elapsedRealtime
 ) {
-    private class Sighting(val firstSeen: Long, yieldMs: Long) {
+    private class Sighting(val firstSeen: Long, yieldMs: Long, val playing: Boolean? = null) {
         val until: Long = if (yieldMs >= Long.MAX_VALUE - firstSeen) Long.MAX_VALUE else firstSeen + yieldMs
     }
 
@@ -32,6 +32,21 @@ class NativeIslandTracker(
     /** @return true when [key] was not tracked yet (first sighting). */
     fun note(key: String, yieldMs: Long = defaultYieldMs): Boolean =
         sightings.putIfAbsent(key, Sighting(clock(), yieldMs.coerceAtLeast(0L))) == null
+
+    /**
+     * A media player whose playback state is known. While it plays, HyperOS keeps its island up,
+     * so the yield has no end; once it stops, the [defaultYieldMs] window runs from that moment
+     * (HyperOS drops a paused player's island soon after, while the notification lingers, #255).
+     * Only a playing/stopped transition re-anchors the window; progress updates never renew it.
+     *
+     * @return true when [key] was new or changed between playing and stopped.
+     */
+    fun notePlayer(key: String, playing: Boolean): Boolean {
+        val previous = sightings[key]
+        if (previous != null && previous.playing == playing) return false
+        sightings[key] = Sighting(clock(), if (playing) Long.MAX_VALUE else defaultYieldMs, playing)
+        return true
+    }
 
     /** @return true when [key] was tracked. */
     fun remove(key: String): Boolean = sightings.remove(key) != null
