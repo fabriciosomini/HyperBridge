@@ -107,6 +107,37 @@ class NativeIslandTrackerTest {
     }
 
     @Test
+    fun playingMediaPlayerHoldsTheYieldForAsLongAsItPlays() {
+        assertTrue(tracker.notePlayer("media|1", playing = true))
+        now += 10 * 60_000L // a long track: the old fixed window ended after 30 s
+        assertFalse(tracker.notePlayer("media|1", playing = true)) // progress update, no change
+        assertTrue(tracker.hasFresh())
+        assertEquals(Long.MAX_VALUE, tracker.remainingYieldMs())
+    }
+
+    @Test
+    fun pausedMediaPlayerYieldsOnlyBrieflyFromTheMomentItPaused() {
+        tracker.notePlayer("media|1", playing = true)
+        now += 10 * 60_000L
+        assertTrue(tracker.notePlayer("media|1", playing = false))
+        assertEquals(30_000L, tracker.remainingYieldMs())
+        now += 29_999L
+        assertFalse(tracker.notePlayer("media|1", playing = false)) // still paused: no renewal
+        assertTrue(tracker.hasFresh())
+        now += 1L
+        assertFalse(tracker.hasFresh()) // #255: a paused player must not hold the pill for hours
+    }
+
+    @Test
+    fun resumingAPausedPlayerYieldsAgain() {
+        tracker.notePlayer("media|1", playing = false)
+        now += 60_000L
+        assertFalse(tracker.hasFresh())
+        assertTrue(tracker.notePlayer("media|1", playing = true))
+        assertTrue(tracker.hasFresh())
+    }
+
+    @Test
     fun keysListsEverythingTracked() {
         tracker.note("a")
         tracker.note("b")
