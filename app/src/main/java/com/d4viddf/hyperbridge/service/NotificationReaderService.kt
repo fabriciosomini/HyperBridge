@@ -1021,6 +1021,33 @@ class NotificationReaderService : NotificationListenerService() {
     }
 
     /**
+     * Notes or forgets [sbn] as a native island.
+     *
+     * @return true when the permanent island has to be re-evaluated
+     */
+    private fun recordNativeIsland(sbn: StatusBarNotification): Boolean {
+        val yieldMs = nativeIslandYieldMs(sbn) ?: return forgetNativeIsland(sbn.key)
+        // A player whose session we can read yields while it plays rather than for a fixed window
+        // from its first sighting, which handed a playing song's cutout to the pill after 30 s.
+        val playing = mediaSessionPlaying(sbn) ?: return noteNativeIsland(sbn.key, yieldMs)
+        val changed = nativeIslands.notePlayer(sbn.key, playing)
+        if (changed) rescheduleNativeYield()
+        return changed
+    }
+
+    /** Whether the media session [sbn] carries is playing, or null when it has none we can read. */
+    private fun mediaSessionPlaying(sbn: StatusBarNotification): Boolean? {
+        val token = sbn.notification.extras
+            ?.getParcelable(Notification.EXTRA_MEDIA_SESSION, MediaSession.Token::class.java)
+            ?: return null
+        return try {
+            MediaController(this, token).playbackState?.isActive
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
      * Records a native island sighting. The yield window closing is a timer, not a notification
      * event — nothing else re-evaluates the permanent island until the next sync tick (up to 60 s,
      * screen on only) — so the pill is re-asserted right after the last open window ends.
@@ -1087,12 +1114,7 @@ class NotificationReaderService : NotificationListenerService() {
         sbn?.let {
             if (::vpnIslandController.isInitialized) vpnIslandController.onSourceNotificationPosted(it)
             if (it.packageName != packageName) {
-                val yieldMs = nativeIslandYieldMs(it)
-                if (yieldMs != null) {
-                    if (noteNativeIsland(it.key, yieldMs)) updatePermanentIsland()
-                } else {
-                    if (forgetNativeIsland(it.key)) updatePermanentIsland()
-                }
+                if (recordNativeIsland(it)) updatePermanentIsland()
             }
 
             enqueueSourceNotification(it)
@@ -2578,12 +2600,7 @@ class NotificationReaderService : NotificationListenerService() {
                 var nativeChanged = false
                 for (sbn in currentNotifications) {
                     if (sbn.packageName != packageName) {
-                        val yieldMs = nativeIslandYieldMs(sbn)
-                        if (yieldMs != null) {
-                            if (noteNativeIsland(sbn.key, yieldMs)) nativeChanged = true
-                        } else {
-                            if (forgetNativeIsland(sbn.key)) nativeChanged = true
-                        }
+                        if (recordNativeIsland(sbn)) nativeChanged = true
                     }
                 }
                 val currentNatives = nativeIslands.keys()
