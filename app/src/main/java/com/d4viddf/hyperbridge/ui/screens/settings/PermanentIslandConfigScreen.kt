@@ -57,6 +57,7 @@ fun PermanentIslandConfigScreen(
     val isEnabled by prefs.isPermanentIslandEnabledFlow.collectAsState(initial = false)
     val islandWidth by prefs.permanentIslandWidthFlow.collectAsState(initial = 0)
     val hideInLandscape by prefs.hidePermanentIslandLandscapeFlow.collectAsState(initial = false)
+    val showOnLockscreen by prefs.permanentIslandOnLockscreenFlow.collectAsState(initial = false)
     val boundWidgetId by prefs.permanentIslandWidgetIdFlow.collectAsState(initial = null)
     var availableWidgets by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<List<CustomWidgetDocument>>(emptyList()) }
 
@@ -68,6 +69,7 @@ fun PermanentIslandConfigScreen(
         isEnabled = isEnabled,
         islandWidth = islandWidth,
         hideInLandscape = hideInLandscape,
+        showOnLockscreen = showOnLockscreen,
         availableWidgets = availableWidgets,
         boundWidgetId = boundWidgetId,
         onEnabledChange = { checked ->
@@ -83,6 +85,11 @@ fun PermanentIslandConfigScreen(
         onHideInLandscapeChange = { hide ->
             scope.launch {
                 prefs.setHidePermanentIslandLandscape(hide)
+            }
+        },
+        onShowOnLockscreenChange = { show ->
+            scope.launch {
+                prefs.setPermanentIslandOnLockscreen(show)
             }
         },
         onWidgetSelected = { id ->
@@ -101,11 +108,13 @@ fun PermanentIslandConfigContent(
     isEnabled: Boolean,
     islandWidth: Int,
     hideInLandscape: Boolean,
+    showOnLockscreen: Boolean,
     availableWidgets: List<CustomWidgetDocument> = emptyList(),
     boundWidgetId: String? = null,
     onEnabledChange: (Boolean) -> Unit,
     onWidthChange: (Int) -> Unit,
     onHideInLandscapeChange: (Boolean) -> Unit,
+    onShowOnLockscreenChange: (Boolean) -> Unit,
     onWidgetSelected: (String?) -> Unit = {},
     onManageSources: () -> Unit = {},
     onBack: () -> Unit
@@ -202,6 +211,29 @@ fun PermanentIslandConfigContent(
                                 onCheckedChange = onHideInLandscapeChange
                             )
                         }
+                        Spacer(Modifier.height(16.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                Text(
+                                    text = stringResource(R.string.permanent_island_lockscreen),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                                )
+                                Text(
+                                    text = stringResource(R.string.permanent_island_lockscreen_desc),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = showOnLockscreen,
+                                onCheckedChange = onShowOnLockscreenChange
+                            )
+                        }
 
                         Spacer(Modifier.height(16.dp))
                         Text(
@@ -254,9 +286,11 @@ fun PermanentIslandConfigScreenPreview() {
             isEnabled = true,
             islandWidth = 10,
             hideInLandscape = false,
+            showOnLockscreen = true,
             onEnabledChange = {},
             onWidthChange = {},
             onHideInLandscapeChange = {},
+            onShowOnLockscreenChange = {},
             onBack = {}
         )
     }
