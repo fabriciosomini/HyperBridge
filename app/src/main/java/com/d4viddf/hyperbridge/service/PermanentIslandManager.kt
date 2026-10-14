@@ -6,11 +6,13 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Color
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
 import com.d4viddf.hyperbridge.R
 import com.d4viddf.hyperbridge.data.AppPreferences
+import com.d4viddf.hyperbridge.data.theme.ThemeRepository
 import com.d4viddf.hyperbridge.data.widget.CustomWidgetRepository
 import com.d4viddf.hyperbridge.data.widget.DeviceVariables
 import com.d4viddf.hyperbridge.data.widget.SourceRepository
@@ -20,6 +22,8 @@ import com.d4viddf.hyperbridge.integration.xiaomi.HyperIslandProtocolOptions
 import com.d4viddf.hyperbridge.integration.xiaomi.KEYGUARD_PERSISTENT_ISLAND_PROPERTY
 import com.d4viddf.hyperbridge.integration.xiaomi.buildJsonParam
 import com.d4viddf.hyperbridge.models.HyperIslandData
+import com.d4viddf.hyperbridge.models.theme.ColorMode
+import com.d4viddf.hyperbridge.models.theme.HyperTheme
 import com.d4viddf.hyperbridge.models.widget.CustomWidgetDocument
 import com.d4viddf.hyperbridge.service.widget.CustomWidgetRenderer
 import com.d4viddf.hyperbridge.util.ShizukuManager
@@ -38,7 +42,8 @@ import kotlin.time.Duration.Companion.milliseconds
 class PermanentIslandManager(
     private val context: Context,
     private val scope: CoroutineScope,
-    private val preferences: AppPreferences
+    private val preferences: AppPreferences,
+    private val themeRepository: ThemeRepository
 ) {
     private val TAG = "HyperBridgeDebug"
 
@@ -61,6 +66,7 @@ class PermanentIslandManager(
     private var showOnLockscreen = false
     private var isKeyguardLocked = false
     private var pendingDispatchJob: Job? = null
+    private var borderColor = resolveBorderColor()
 
     // --- Custom micro-widget on the permanent island (#273 "island content sources") ---
     private val customWidgetRepository = CustomWidgetRepository(context)
@@ -170,6 +176,9 @@ class PermanentIslandManager(
                 }
             }
         }
+        scope.launch {
+            themeRepository.activeTheme.collectLatest { refreshBorderColor() }
+        }
     }
 
     @Synchronized
@@ -180,9 +189,27 @@ class PermanentIslandManager(
     }
 
     @Synchronized
-    fun onOrientationChanged() {
+    fun onConfigurationChanged() {
+        // A new wallpaper palette changes the Material You accent.
+        refreshBorderColor()
         updateStateLocked()
     }
+
+    // Re-post in place so the island's border picks up the new colour.
+    @Synchronized
+    private fun refreshBorderColor() {
+        val color = resolveBorderColor()
+        if (color != borderColor) {
+            borderColor = color
+            if (isIslandActive) dispatchPermanentIsland()
+        }
+    }
+
+    private fun resolveBorderColor(): String = PermanentIslandBorderColor.resolve(
+        theme = themeRepository.activeTheme.value,
+        materialYouHex = String.format("#%06X", context.getColor(android.R.color.system_accent1_200) and 0xFFFFFF),
+        isValidColor = { runCatching { Color.parseColor(it) }.isSuccess }
+    )
 
     // isIslandPresent reflects whether PERMANENT_BRIDGE_ID is actually posted right now.
     // Presence only proves the notification exists, NOT that its island is visible:
@@ -275,7 +302,7 @@ class PermanentIslandManager(
             
             // Should not be dismissible and shouldn't show in shade
             builder.setEnableFloat(false)
-            builder.setIslandConfig(timeout = 86400000, dismissible = false, highlightColor = "#FFFFFF", expandedTimeMs = 0)
+            builder.setIslandConfig(timeout = 86400000, dismissible = false, highlightColor = borderColor, expandedTimeMs = 0)
             builder.setShowNotification(false)
             builder.setReopen(true)
             builder.setIslandFirstFloat(false)
@@ -347,5 +374,23 @@ class PermanentIslandManager(
         } catch (e: Exception) {
             Log.e(TAG, "Error removing permanent island", e)
         }
+    }
+}
+
+/**
+ * The Permanent Island's `highlightColor`, which HyperOS uses only to tint the island's border: it
+ * draws the stroke at 20% of the colour's alpha, and only while the area behind the cutout is dark
+ * (never over light content, in either theme). Follows the active theme's global island colour like
+ * bridged islands do; Material You takes the light accent tone, because a dark one would vanish
+ * against the dark background the border is drawn on. App-icon mode has no app to sample here, so
+ * it uses the stored colour.
+ */
+internal object PermanentIslandBorderColor {
+    const val DEFAULT = "#FFFFFF"
+
+    fun resolve(theme: HyperTheme?, materialYouHex: String, isValidColor: (String) -> Boolean): String {
+        val global = theme?.global ?: return DEFAULT
+        if (global.activeColorMode == ColorMode.MATERIAL_YOU) return materialYouHex
+        return global.highlightColor?.takeIf(isValidColor) ?: DEFAULT
     }
 }

@@ -306,7 +306,7 @@ class NotificationReaderService : NotificationListenerService() {
             WidgetManager.init(this)
         }
 
-        permanentIslandManager = PermanentIslandManager(this, serviceScope, preferences)
+        permanentIslandManager = PermanentIslandManager(this, serviceScope, preferences, themeRepository)
         vpnIslandController = VpnIslandController(
             this,
             serviceScope,
@@ -1081,7 +1081,7 @@ class NotificationReaderService : NotificationListenerService() {
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
-        permanentIslandManager.onOrientationChanged()
+        permanentIslandManager.onConfigurationChanged()
         logStateChange(newConfig.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
     }
 
