@@ -219,6 +219,23 @@
             android:enabled="true"
             android:exported="false" />
 
+        <!--
+          Reads where HyperOS draws its islands. Must NOT declare android:process: it hands its
+          snapshot to PermanentIslandManager through an in-process singleton.
+        -->
+        <service
+            android:name=".service.IslandAccessibilityService"
+            android:label="@string/island_accessibility_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/island_accessibility_config" />
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"

@@ -33,6 +33,7 @@ import io.github.d4viddf.hyperisland_kit.models.TextInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -53,6 +54,9 @@ class PermanentIslandManager(
         // island. Delaying the post lets HyperOS finish tearing that island down,
         // otherwise it can swallow the re-post and leave 9999 posted but hidden.
         private const val DISPATCH_DELAY_MS = 700L
+
+        /** The resolved border colour, shared in-process with [IslandAccessibilityService]'s ring. */
+        val currentBorderColor = MutableStateFlow(PermanentIslandBorderColor.DEFAULT)
     }
 
     private var isPermanentIslandEnabled = false
@@ -103,6 +107,7 @@ class PermanentIslandManager(
     }
 
     init {
+        currentBorderColor.value = borderColor
         isKeyguardLocked = keyguardManager?.isKeyguardLocked == true
         context.registerReceiver(screenReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
@@ -201,6 +206,7 @@ class PermanentIslandManager(
         val color = resolveBorderColor()
         if (color != borderColor) {
             borderColor = color
+            currentBorderColor.value = color
             if (isIslandActive) dispatchPermanentIsland()
         }
     }
