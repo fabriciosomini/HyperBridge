@@ -47,6 +47,8 @@
     <string name="permanent_island_hide_landscape">Ocultar na Horizontal</string>
     <string name="permanent_island_lockscreen">Mostrar na Tela de Bloqueio</string>
     <string name="permanent_island_lockscreen_desc">Mantém a cápsula visível enquanto o telefone está bloqueado. Testado no HyperOS 4; pode não aparecer com a Tela sempre ativa ativada.</string>
+    <string name="island_border_ring">Mostrar Borda</string>
+    <string name="island_border_ring_desc">Desenha um contorno na cor do tema ao redor de todas as ilhas, inclusive sobre telas claras. Requer o serviço de acessibilidade HyperBridge island awareness ativado.</string>
     <string name="group_about">Sobre</string>
     <string name="special_thanks">Special Thanks</string>
     <string name="developer">Desenvolvedor</string>
