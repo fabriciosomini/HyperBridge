@@ -7,6 +7,7 @@ import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -27,8 +28,10 @@ import kotlinx.coroutines.launch
  * content and at 20% alpha; this ring is visible everywhere. The native border is left alone.
  *
  * Islands are found in the island window's node tree: `big_island_view` (the pill) and
- * `small_island_view` (the circle). Expanded cards are skipped by height. While any island moves
- * or resizes (expand, merge, width change) the rings hide and come back once the bounds hold still.
+ * `small_island_view` (the circle). Expanded cards are skipped by height. The rings fade out as
+ * soon as anything changes (bounds, or HyperOS's `fake_*` animation twins appearing) and fade back
+ * in once the bounds hold still. After every island event the tree is polled briefly, since the
+ * animation itself runs without further events.
  *
  * Must stay in the app's default process: the colour comes from an in-process StateFlow.
  */
@@ -43,7 +46,13 @@ class IslandAccessibilityService : AccessibilityService() {
     private var color = PermanentIslandBorderColor.DEFAULT
     private var enabled = true
 
-    private val refreshRunnable = Runnable { refresh() }
+    private var pollUntil = 0L
+    private val pollRunnable = object : Runnable {
+        override fun run() {
+            refresh()
+            if (SystemClock.uptimeMillis() < pollUntil) handler.postDelayed(this, POLL_MS)
+        }
+    }
     private val showRunnable = Runnable { showRings(pendingBounds) }
 
     override fun onServiceConnected() {
@@ -69,12 +78,23 @@ class IslandAccessibilityService : AccessibilityService() {
         if (event.eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED &&
             event.packageName?.toString() != ISLAND_PACKAGE
         ) return
-        handler.removeCallbacks(refreshRunnable)
-        handler.postDelayed(refreshRunnable, EVENT_COALESCE_MS)
+        // Check right away, then keep polling for a moment: the animation an event kicks off
+        // reports no further events of its own.
+        pollUntil = SystemClock.uptimeMillis() + POLL_WINDOW_MS
+        handler.removeCallbacks(pollRunnable)
+        pollRunnable.run()
     }
 
     private fun refresh() {
-        val bounds = findPills()
+        val scan = scanIslands()
+        if (scan.animating) {
+            // Mid-animation: hide at the slightest change and wait for things to settle.
+            handler.removeCallbacks(showRunnable)
+            pendingBounds = emptyList()
+            removeRings()
+            return
+        }
+        val bounds = scan.pills
         if (bounds.isEmpty()) {
             handler.removeCallbacks(showRunnable)
             pendingBounds = emptyList()
@@ -91,30 +111,37 @@ class IslandAccessibilityService : AccessibilityService() {
         handler.postDelayed(showRunnable, SETTLE_MS)
     }
 
-    private fun findPills(): List<Rect> {
-        if (!enabled) return emptyList()
-        val found = mutableListOf<Rect>()
+    private class Scan(val pills: MutableList<Rect> = mutableListOf(), var animating: Boolean = false)
+
+    private fun scanIslands(): Scan {
+        val scan = Scan()
+        if (!enabled) return scan
         val all = runCatching { windows }.getOrNull().orEmpty()
         for (w in all) {
             val root = runCatching { w.root }.getOrNull() ?: continue
             if (root.packageName?.toString() != ISLAND_PACKAGE) continue
-            collectPillNodes(root, 0, found)
+            collectPillNodes(root, 0, scan)
         }
-        return found.sortedBy { it.left }
+        scan.pills.sortBy { it.left }
+        return scan
     }
 
-    private fun collectPillNodes(node: AccessibilityNodeInfo, depth: Int, out: MutableList<Rect>) {
+    private fun collectPillNodes(node: AccessibilityNodeInfo, depth: Int, scan: Scan) {
         if (depth > MAX_NODE_DEPTH) return
         val id = node.viewIdResourceName
+        if (id != null && FAKE_VIEW_IDS.any { id.endsWith(":id/$it") }) {
+            if (node.isVisibleToUser) scan.animating = true
+            return
+        }
         if (id != null && PILL_VIEW_IDS.any { id.endsWith(":id/$it") }) {
             val r = Rect().also { node.getBoundsInScreen(it) }
             val maxHeightPx = MAX_PILL_HEIGHT_DP * resources.displayMetrics.density
-            if (node.isVisibleToUser && !r.isEmpty && r.height() <= maxHeightPx) out += r
+            if (node.isVisibleToUser && !r.isEmpty && r.height() <= maxHeightPx) scan.pills += r
             return
         }
         for (i in 0 until node.childCount) {
             val child = runCatching { node.getChild(i) }.getOrNull() ?: continue
-            collectPillNodes(child, depth + 1, out)
+            collectPillNodes(child, depth + 1, scan)
         }
     }
 
@@ -129,6 +156,7 @@ class IslandAccessibilityService : AccessibilityService() {
         val parsed = runCatching { Color.parseColor(color) }.getOrDefault(Color.WHITE)
         val strokePx = (STROKE_DP * resources.displayMetrics.density).toInt().coerceAtLeast(1)
         val view = View(this).apply {
+            alpha = 0f
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = minOf(bounds.width(), bounds.height()) / 2f
@@ -153,14 +181,24 @@ class IslandAccessibilityService : AccessibilityService() {
         }
         try {
             wm.addView(view, params)
+            view.animate().alpha(1f).setDuration(FADE_IN_MS).start()
             rings += view
         } catch (e: Exception) {
             Log.e(TAG, "Failed to add island ring", e)
         }
     }
 
-    private fun removeRings() {
-        rings.forEach { runCatching { windowManager?.removeView(it) } }
+    private fun removeRings(fade: Boolean = true) {
+        rings.forEach { view ->
+            view.animate().cancel()
+            if (fade) {
+                view.animate().alpha(0f).setDuration(FADE_OUT_MS)
+                    .withEndAction { runCatching { windowManager?.removeView(view) } }
+                    .start()
+            } else {
+                runCatching { windowManager?.removeView(view) }
+            }
+        }
         rings.clear()
         ringBounds = emptyList()
     }
@@ -169,13 +207,13 @@ class IslandAccessibilityService : AccessibilityService() {
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         handler.removeCallbacksAndMessages(null)
-        removeRings()
+        removeRings(fade = false)
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
-        removeRings()
+        removeRings(fade = false)
         scope.cancel()
         super.onDestroy()
     }
@@ -188,8 +226,13 @@ class IslandAccessibilityService : AccessibilityService() {
         // A collapsed pill is ~33 dp tall; anything taller is an expanded card.
         private const val MAX_PILL_HEIGHT_DP = 48f
         private const val MAX_NODE_DEPTH = 12
-        private const val EVENT_COALESCE_MS = 50L
-        private const val SETTLE_MS = 250L
+        // Present only while HyperOS animates an island.
+        private val FAKE_VIEW_IDS = listOf("fake_big_island_view", "fake_small_island_view")
+        private const val POLL_MS = 32L
+        private const val POLL_WINDOW_MS = 600L
+        private const val SETTLE_MS = 150L
+        private const val FADE_IN_MS = 150L
+        private const val FADE_OUT_MS = 80L
         private const val STROKE_DP = 1.5f
     }
 }
