@@ -29,9 +29,13 @@ import kotlinx.coroutines.launch
  *
  * Islands are found in the island window's node tree: `big_island_view` (the pill) and
  * `small_island_view` (the circle). Expanded cards are skipped by height. The rings fade out as
- * soon as anything changes (bounds, or HyperOS's `fake_*` animation twins appearing) and fade back
- * in once the bounds hold still. After every island event the tree is polled briefly, since the
- * animation itself runs without further events.
+ * soon as an island animation starts and fade back in once the bounds hold still.
+ *
+ * The node tree lags the screen by 100-180 ms and only refreshes on events, so: a subtree-only content
+ * change from the island (what HyperOS sends when an island starts moving; the timer's text ticks
+ * carry other flags) hides the rings at once, and polling re-fetches the pill nodes' bounds.
+ * Island notifications posted or removed ([IslandChangeHint]) arrive before HyperOS animates at
+ * all; they hide the rings and hold them off for [HINT_HOLD_MS] while the animation plays.
  *
  * Must stay in the app's default process: the colour comes from an in-process StateFlow.
  */
@@ -47,6 +51,7 @@ class IslandAccessibilityService : AccessibilityService() {
     private var enabled = true
 
     private var pollUntil = 0L
+    private var holdUntil = 0L
     private val pollRunnable = object : Runnable {
         override fun run() {
             refresh()
@@ -70,7 +75,16 @@ class IslandAccessibilityService : AccessibilityService() {
                 refresh()
             }
         }
+        IslandChangeHint.listener = { handler.post { onIslandChangeHint() } }
         refresh()
+    }
+
+    private fun onIslandChangeHint() {
+        holdUntil = SystemClock.uptimeMillis() + HINT_HOLD_MS
+        hideNow()
+        // Nothing may report the animation's end; look again once the hold is over.
+        handler.postAtTime(pollRunnable, holdUntil)
+        pollUntil = holdUntil + POLL_WINDOW_MS
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -78,6 +92,10 @@ class IslandAccessibilityService : AccessibilityService() {
         if (event.eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED &&
             event.packageName?.toString() != ISLAND_PACKAGE
         ) return
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+            event.packageName?.toString() == ISLAND_PACKAGE &&
+            event.contentChangeTypes == AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE
+        ) hideNow()
         // Check right away, then keep polling for a moment: the animation an event kicks off
         // reports no further events of its own.
         pollUntil = SystemClock.uptimeMillis() + POLL_WINDOW_MS
@@ -86,15 +104,8 @@ class IslandAccessibilityService : AccessibilityService() {
     }
 
     private fun refresh() {
-        val scan = scanIslands()
-        if (scan.animating) {
-            // Mid-animation: hide at the slightest change and wait for things to settle.
-            handler.removeCallbacks(showRunnable)
-            pendingBounds = emptyList()
-            removeRings()
-            return
-        }
-        val bounds = scan.pills
+        if (SystemClock.uptimeMillis() < holdUntil) return
+        val bounds = scanIslands().pills
         if (bounds.isEmpty()) {
             handler.removeCallbacks(showRunnable)
             pendingBounds = emptyList()
@@ -111,7 +122,13 @@ class IslandAccessibilityService : AccessibilityService() {
         handler.postDelayed(showRunnable, SETTLE_MS)
     }
 
-    private class Scan(val pills: MutableList<Rect> = mutableListOf(), var animating: Boolean = false)
+    private fun hideNow() {
+        handler.removeCallbacks(showRunnable)
+        pendingBounds = emptyList()
+        removeRings()
+    }
+
+    private class Scan(val pills: MutableList<Rect> = mutableListOf())
 
     private fun scanIslands(): Scan {
         val scan = Scan()
@@ -129,11 +146,9 @@ class IslandAccessibilityService : AccessibilityService() {
     private fun collectPillNodes(node: AccessibilityNodeInfo, depth: Int, scan: Scan) {
         if (depth > MAX_NODE_DEPTH) return
         val id = node.viewIdResourceName
-        if (id != null && FAKE_VIEW_IDS.any { id.endsWith(":id/$it") }) {
-            if (node.isVisibleToUser) scan.animating = true
-            return
-        }
         if (id != null && PILL_VIEW_IDS.any { id.endsWith(":id/$it") }) {
+            // Bypass the client-side node cache, which only updates on events.
+            runCatching { node.refresh() }
             val r = Rect().also { node.getBoundsInScreen(it) }
             val maxHeightPx = MAX_PILL_HEIGHT_DP * resources.displayMetrics.density
             if (node.isVisibleToUser && !r.isEmpty && r.height() <= maxHeightPx) scan.pills += r
@@ -206,6 +221,7 @@ class IslandAccessibilityService : AccessibilityService() {
     override fun onInterrupt() {}
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
+        IslandChangeHint.listener = null
         handler.removeCallbacksAndMessages(null)
         removeRings(fade = false)
         return super.onUnbind(intent)
@@ -221,16 +237,16 @@ class IslandAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "IslandRing"
         private const val ISLAND_PACKAGE = "miui.systemui.plugin"
-        // Exact ids: the fake_* twins only exist during animations.
+        // Exact ids: excludes the fake_* twins.
         private val PILL_VIEW_IDS = listOf("big_island_view", "small_island_view")
         // A collapsed pill is ~33 dp tall; anything taller is an expanded card.
         private const val MAX_PILL_HEIGHT_DP = 48f
         private const val MAX_NODE_DEPTH = 12
-        // Present only while HyperOS animates an island.
-        private val FAKE_VIEW_IDS = listOf("fake_big_island_view", "fake_small_island_view")
         private const val POLL_MS = 32L
         private const val POLL_WINDOW_MS = 600L
         private const val SETTLE_MS = 150L
+        // HyperOS's island transitions take roughly 400-500 ms from the notification.
+        private const val HINT_HOLD_MS = 450L
         private const val FADE_IN_MS = 150L
         private const val FADE_OUT_MS = 80L
         private const val STROKE_DP = 1.5f

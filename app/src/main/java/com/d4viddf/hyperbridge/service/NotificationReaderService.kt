@@ -150,6 +150,8 @@ class NotificationReaderService : NotificationListenerService() {
     // Other apps' islands. The permanent island yields to a native island only for a short window
     // after it first appears, not for the notification's whole lifetime (see NativeIslandTracker).
     private val nativeIslands = NativeIslandTracker()
+    /** Our own posted island notifications, to tell a new island from an update for [IslandChangeHint]. */
+    private val ownIslandKeys = ConcurrentHashMap.newKeySet<String>()
     // Rescheduled from listener callbacks (main) and from the periodic sync (IO): guarded by its lock.
     private val nativeYieldLock = Any()
     private var nativeYieldJob: Job? = null
@@ -518,8 +520,10 @@ class NotificationReaderService : NotificationListenerService() {
         sbn?.let {
             if (::vpnIslandController.isInitialized) vpnIslandController.onSourceNotificationRemoved(it)
             if (forgetNativeIsland(it.key)) {
+                IslandChangeHint.fire()
                 updatePermanentIsland()
             }
+            if (ownIslandKeys.remove(it.key)) IslandChangeHint.fire()
 
             val isOurApp = it.packageName == packageName
             val notifId = it.id
@@ -1098,7 +1102,14 @@ class NotificationReaderService : NotificationListenerService() {
         sbn?.let {
             if (::vpnIslandController.isInitialized) vpnIslandController.onSourceNotificationPosted(it)
             if (it.packageName != packageName) {
-                if (recordNativeIsland(it)) updatePermanentIsland()
+                if (recordNativeIsland(it)) {
+                    IslandChangeHint.fire()
+                    updatePermanentIsland()
+                }
+            } else if (it.notification.extras?.containsKey("miui.focus.param") == true &&
+                ownIslandKeys.add(it.key)
+            ) {
+                IslandChangeHint.fire()
             }
 
             enqueueSourceNotification(it)
