@@ -60,6 +60,8 @@
     <string name="island_accessibility_label">HyperBridge island awareness</string>
     <string name="island_accessibility_desc">Checks which islands HyperOS is drawing at the camera cutout, so the Permanent Island only steps aside while another island is really on screen. Reads only the island area, never other apps.</string>
     <string name="permanent_island_lockscreen">Show on Lock Screen</string>
+    <string name="island_border_ring">Show Border</string>
+    <string name="island_border_ring_desc">Draw a ring in the theme colour around every island, over light screens too. Needs the HyperBridge island awareness accessibility service turned on.</string>
     <string name="permanent_island_lockscreen_desc">Keep the capsule visible while the phone is locked. Tested on HyperOS 4; may not show when Always-on Display is enabled.</string>
 
     <string name="group_about">About</string>

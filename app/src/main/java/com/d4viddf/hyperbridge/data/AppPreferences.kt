@@ -815,6 +815,7 @@ class AppPreferences internal constructor(
     private val HIDE_PERMANENT_ISLAND_LANDSCAPE = "hide_permanent_island_landscape"
     private val PERMANENT_ISLAND_WIDGET_ID = "permanent_island_widget_id"
     private val PERMANENT_ISLAND_ON_LOCKSCREEN = "permanent_island_on_lockscreen"
+    private val ISLAND_BORDER_RING = "island_border_ring"
 
     val isPermanentIslandEnabledFlow: Flow<Boolean> = dao.getSettingFlow(SHOW_PERMANENT_ISLAND)
         .map { it?.toBoolean() ?: false }
@@ -830,6 +831,10 @@ class AppPreferences internal constructor(
 
     val permanentIslandOnLockscreenFlow: Flow<Boolean> = dao.getSettingFlow(PERMANENT_ISLAND_ON_LOCKSCREEN)
         .map { it?.toBoolean() ?: false }
+
+    /** Ring drawn around the islands by IslandAccessibilityService. On unless turned off. */
+    val islandBorderRingFlow: Flow<Boolean> = dao.getSettingFlow(ISLAND_BORDER_RING)
+        .map { it?.toBoolean() ?: true }
 
     suspend fun setPermanentIslandEnabled(value: Boolean) {
         save(SHOW_PERMANENT_ISLAND, value.toString())
@@ -849,6 +854,10 @@ class AppPreferences internal constructor(
 
     suspend fun setPermanentIslandOnLockscreen(value: Boolean) {
         save(PERMANENT_ISLAND_ON_LOCKSCREEN, value.toString())
+    }
+
+    suspend fun setIslandBorderRing(value: Boolean) {
+        save(ISLAND_BORDER_RING, value.toString())
     }
 
     fun hidePermanentIslandLandscapeSync(): Boolean {

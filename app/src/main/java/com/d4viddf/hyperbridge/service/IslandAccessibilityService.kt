@@ -13,6 +13,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.d4viddf.hyperbridge.data.AppPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,6 +41,7 @@ class IslandAccessibilityService : AccessibilityService() {
     private var ringBounds: List<Rect> = emptyList()
     private var pendingBounds: List<Rect> = emptyList()
     private var color = PermanentIslandBorderColor.DEFAULT
+    private var enabled = true
 
     private val refreshRunnable = Runnable { refresh() }
     private val showRunnable = Runnable { showRings(pendingBounds) }
@@ -51,6 +53,12 @@ class IslandAccessibilityService : AccessibilityService() {
             PermanentIslandManager.currentBorderColor.collect {
                 color = it
                 if (rings.isNotEmpty()) showRings(ringBounds)
+            }
+        }
+        scope.launch {
+            AppPreferences(applicationContext).islandBorderRingFlow.collect {
+                enabled = it
+                refresh()
             }
         }
         refresh()
@@ -84,6 +92,7 @@ class IslandAccessibilityService : AccessibilityService() {
     }
 
     private fun findPills(): List<Rect> {
+        if (!enabled) return emptyList()
         val found = mutableListOf<Rect>()
         val all = runCatching { windows }.getOrNull().orEmpty()
         for (w in all) {

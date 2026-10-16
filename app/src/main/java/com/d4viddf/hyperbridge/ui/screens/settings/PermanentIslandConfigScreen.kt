@@ -58,6 +58,7 @@ fun PermanentIslandConfigScreen(
     val islandWidth by prefs.permanentIslandWidthFlow.collectAsState(initial = 0)
     val hideInLandscape by prefs.hidePermanentIslandLandscapeFlow.collectAsState(initial = false)
     val showOnLockscreen by prefs.permanentIslandOnLockscreenFlow.collectAsState(initial = false)
+    val showBorder by prefs.islandBorderRingFlow.collectAsState(initial = true)
     val boundWidgetId by prefs.permanentIslandWidgetIdFlow.collectAsState(initial = null)
     var availableWidgets by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<List<CustomWidgetDocument>>(emptyList()) }
 
@@ -70,6 +71,7 @@ fun PermanentIslandConfigScreen(
         islandWidth = islandWidth,
         hideInLandscape = hideInLandscape,
         showOnLockscreen = showOnLockscreen,
+        showBorder = showBorder,
         availableWidgets = availableWidgets,
         boundWidgetId = boundWidgetId,
         onEnabledChange = { checked ->
@@ -92,6 +94,11 @@ fun PermanentIslandConfigScreen(
                 prefs.setPermanentIslandOnLockscreen(show)
             }
         },
+        onShowBorderChange = { show ->
+            scope.launch {
+                prefs.setIslandBorderRing(show)
+            }
+        },
         onWidgetSelected = { id ->
             scope.launch {
                 prefs.setPermanentIslandWidgetId(id)
@@ -109,12 +116,14 @@ fun PermanentIslandConfigContent(
     islandWidth: Int,
     hideInLandscape: Boolean,
     showOnLockscreen: Boolean,
+    showBorder: Boolean = true,
     availableWidgets: List<CustomWidgetDocument> = emptyList(),
     boundWidgetId: String? = null,
     onEnabledChange: (Boolean) -> Unit,
     onWidthChange: (Int) -> Unit,
     onHideInLandscapeChange: (Boolean) -> Unit,
     onShowOnLockscreenChange: (Boolean) -> Unit,
+    onShowBorderChange: (Boolean) -> Unit = {},
     onWidgetSelected: (String?) -> Unit = {},
     onManageSources: () -> Unit = {},
     onBack: () -> Unit
@@ -171,6 +180,30 @@ fun PermanentIslandConfigContent(
                         Switch(
                             checked = isEnabled,
                             onCheckedChange = onEnabledChange
+                        )
+                    }
+                    // Outside `if (isEnabled)`: the ring also covers other apps' islands.
+                    Spacer(Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                            Text(
+                                text = stringResource(R.string.island_border_ring),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                            )
+                            Text(
+                                text = stringResource(R.string.island_border_ring_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = showBorder,
+                            onCheckedChange = onShowBorderChange
                         )
                     }
                     
