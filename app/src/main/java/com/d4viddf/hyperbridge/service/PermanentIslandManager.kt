@@ -187,9 +187,11 @@ class PermanentIslandManager(
     // isIslandPresent reflects whether PERMANENT_BRIDGE_ID is actually posted right now.
     // Presence only proves the notification exists, NOT that its island is visible:
     // HyperOS can keep 9999 posted while hiding its island (e.g. a bridged focus island
-    // superseded it, or a re-post landed too soon after a cancel). So on a discrete
-    // transition (screen on / unlock / (re)connect) callers pass refresh=true to re-assert
-    // the island even when present; the periodic tick passes false, trusting presence.
+    // superseded it, a re-post landed too soon after a cancel, or the user swiped the pill
+    // left, which drops the island with no listener callback). So callers pass refresh=true to
+    // re-assert the island even when present: on screen on / unlock / (re)connect, and on the
+    // 1-minute tick so a swiped pill comes back. Re-asserting a visible pill is an in-place
+    // update HyperOS draws identically (checked frame by frame on HyperOS 4).
     // The permanent island also steps aside for our own bridged islands (and widgets / the VPN
     // island). #243 kept 9999 posted underneath them so it was revealed the instant a bridged
     // island collapsed, which was fine while HyperOS drew one island at a time. HyperOS 3 draws
