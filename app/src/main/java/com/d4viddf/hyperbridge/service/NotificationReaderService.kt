@@ -2571,8 +2571,10 @@ class NotificationReaderService : NotificationListenerService() {
                 delay(60_000.milliseconds) // 1 minute periodic sync
                 // Screen off: nothing to keep in sync visually, and SCREEN_ON runs a full
                 // refresh sync on wake — skip the tick instead of waking up all night.
+                // Refresh on the tick too: swiping the pill left drops its island while 9999
+                // stays posted, with no callback, so only a re-post brings it back.
                 if (isScreenOn) {
-                    syncNotifications()
+                    syncNotifications(refresh = true)
                 }
             }
         }
