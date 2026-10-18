@@ -18,6 +18,8 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Xiaomi's clock only accepts ACTION_SHOW_ALARMS (the next-alarm pill's tap) from holders. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
     <queries>
         <intent>
@@ -106,6 +108,14 @@
 
         <activity
             android:name=".service.IslandTapActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <activity
+            android:name=".service.NextAlarmTapActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:noHistory="true"
