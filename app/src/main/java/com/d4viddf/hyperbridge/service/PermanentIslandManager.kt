@@ -1,15 +1,25 @@
 package com.d4viddf.hyperbridge.service
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.KeyguardManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.database.ContentObserver
+import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
+import android.provider.Settings
+import android.text.format.DateFormat
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
 import com.d4viddf.hyperbridge.R
 import com.d4viddf.hyperbridge.data.AppPreferences
 import com.d4viddf.hyperbridge.data.widget.CustomWidgetRepository
@@ -25,7 +35,9 @@ import com.d4viddf.hyperbridge.models.widget.CustomWidgetDocument
 import com.d4viddf.hyperbridge.service.widget.CustomWidgetRenderer
 import com.d4viddf.hyperbridge.util.ShizukuManager
 import io.github.d4viddf.hyperisland_kit.HyperIslandNotification
+import io.github.d4viddf.hyperisland_kit.HyperPicture
 import io.github.d4viddf.hyperisland_kit.models.ImageTextInfoLeft
+import io.github.d4viddf.hyperisland_kit.models.PicInfo
 import io.github.d4viddf.hyperisland_kit.models.TextInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -33,6 +45,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import java.time.ZoneId
 import kotlin.time.Duration.Companion.milliseconds
 
 
@@ -45,6 +58,7 @@ class PermanentIslandManager(
 
     companion object {
         const val PERMANENT_BRIDGE_ID = 9999
+        private const val NEXT_ALARM_PIC = "next_alarm"
         // The dismiss path posts 9999 right after cancelling the previous focus
         // island. Delaying the post lets HyperOS finish tearing that island down,
         // otherwise it can swallow the re-post and leave 9999 posted but hidden.
@@ -60,6 +74,7 @@ class PermanentIslandManager(
     private var currentWidth = 0
     private var isHideInLandscapeEnabled = false
     private var showOnLockscreen = false
+    private var showNextAlarm = false
     private var isKeyguardLocked = false
     private var pendingDispatchJob: Job? = null
     // Whether 9999 is posted right now, so a dispatch can tell a fresh add from an in-place update.
@@ -118,12 +133,51 @@ class PermanentIslandManager(
         }
     }
 
+    // An alarm set, changed or dismissed re-renders the pill at once; the 1-minute sync tick
+    // re-dispatches too, which covers an alarm moving into the 12 h window.
+    private val nextAlarmReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = onNextAlarmChanged()
+    }
+    // Xiaomi's clock app rewrites its next-alarm setting whenever its alarms change.
+    private val nextAlarmObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) = onNextAlarmChanged()
+    }
+
+    // Sent by NextAlarmTapActivity: opening the clock from the card hides the pill ("app opened
+    // from island"), and only a fresh add clears that, so cancel and post again.
+    private val repostReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            synchronized(this@PermanentIslandManager) {
+                if (isIslandActive) {
+                    removePermanentIsland()
+                    scheduleDispatchLocked()
+                }
+            }
+        }
+    }
+
+    private fun onNextAlarmChanged() {
+        synchronized(this) {
+            if (isIslandActive && showNextAlarm) dispatchPermanentIsland()
+        }
+    }
+
     init {
         isKeyguardLocked = keyguardManager?.isKeyguardLocked == true
         context.registerReceiver(screenReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_USER_PRESENT)
         })
+        context.registerReceiver(nextAlarmReceiver, IntentFilter(AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED))
+        ContextCompat.registerReceiver(
+            context,
+            repostReceiver,
+            IntentFilter(NextAlarmTapActivity.ACTION_REPOST_PERMANENT_ISLAND),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        context.contentResolver.registerContentObserver(
+            Settings.Global.getUriFor(NextAlarmPillPolicy.XIAOMI_NEXT_ALARM_KEY), false, nextAlarmObserver
+        )
 
         scope.launch {
             preferences.permanentIslandWidgetIdFlow.collectLatest { widgetId ->
@@ -168,6 +222,18 @@ class PermanentIslandManager(
                 synchronized(this@PermanentIslandManager) {
                     if (currentWidth != width) {
                         currentWidth = width
+                        if (isIslandActive) {
+                            dispatchPermanentIsland()
+                        }
+                    }
+                }
+            }
+        }
+        scope.launch {
+            preferences.permanentIslandNextAlarmFlow.collectLatest { show ->
+                synchronized(this@PermanentIslandManager) {
+                    if (showNextAlarm != show) {
+                        showNextAlarm = show
                         if (isIslandActive) {
                             dispatchPermanentIsland()
                         }
@@ -235,6 +301,9 @@ class PermanentIslandManager(
 
     fun stop() {
         runCatching { context.unregisterReceiver(screenReceiver) }
+        runCatching { context.unregisterReceiver(nextAlarmReceiver) }
+        runCatching { context.contentResolver.unregisterContentObserver(nextAlarmObserver) }
+        runCatching { context.unregisterReceiver(repostReceiver) }
     }
 
     @Synchronized
@@ -311,6 +380,13 @@ class PermanentIslandManager(
             builder.setIslandFirstFloat(false)
 
             val widgetDoc = currentCustomWidgetDoc
+            val alarmMillis = if (showNextAlarm && widgetDoc == null) nextAlarmMillis() else null
+            val alarmLabel = NextAlarmPillPolicy.label(
+                triggerAtMillis = alarmMillis,
+                nowMillis = System.currentTimeMillis(),
+                is24Hour = DateFormat.is24HourFormat(context),
+                zone = ZoneId.systemDefault()
+            )
             if (widgetDoc != null) {
                 // #273 "island content sources": render the bound micro-widget instead of the
                 // blank spacer, so e.g. a weather app driving {source.weather.text} shows on the
@@ -334,13 +410,30 @@ class PermanentIslandManager(
                 builder.setCustomIslandExpandRemoteView(widgetView)
                 builder.setSmallIsland("")
             } else {
-                // Only big paramislands with empty values for textonleft and picKey = null
-                // Use width spaces to change width
-                val emptyString = "\u00A0".repeat(currentWidth)
-                builder.setBigIslandInfo(
-                    left = ImageTextInfoLeft(1, null, TextInfo(emptyString, emptyString)),
-                    right = null
-                )
+                if (alarmLabel != null && alarmMillis != null) {
+                    // Icon on the left, plain text on the right. bigIslandArea.textInfo becomes the
+                    // plugin's moduleText; an imageTextInfoRight of type 1 is skipped on the right.
+                    builder.addPicture(HyperPicture(NEXT_ALARM_PIC, alarmIconBitmap()))
+                    builder.setBigIslandInfo(
+                        left = ImageTextInfoLeft(1, PicInfo(1, NEXT_ALARM_PIC), TextInfo("", "")),
+                        centerText = TextInfo(alarmLabel)
+                    )
+                    // The card a tap expands the pill into; tapping it opens the alarm list.
+                    val (hoursLeft, minutesLeft) = NextAlarmPillPolicy.timeLeft(alarmMillis, System.currentTimeMillis())
+                    builder.setBaseInfo(
+                        title = DateFormat.getTimeFormat(context).format(java.util.Date(alarmMillis)),
+                        content = context.getString(R.string.permanent_island_next_alarm_in, hoursLeft, minutesLeft),
+                        pictureKey = NEXT_ALARM_PIC
+                    )
+                } else {
+                    // Only big paramislands with empty values for textonleft and picKey = null
+                    // Use width spaces to change width
+                    val emptyString = "\u00A0".repeat(currentWidth)
+                    builder.setBigIslandInfo(
+                        left = ImageTextInfoLeft(1, null, TextInfo(emptyString, emptyString)),
+                        right = null
+                    )
+                }
                 builder.setSmallIsland("")
             }
 
@@ -358,6 +451,11 @@ class PermanentIslandManager(
                 .setContentText("Empty Island")
                 .setPriority(NotificationCompat.PRIORITY_MIN)
                 .setOngoing(true)
+            // Opens the clock's alarm list via NextAlarmTapActivity, which also re-posts the pill.
+            // HyperOS only sends this from the expanded island: a tap on the collapsed pill expands
+            // it, and the direct-tap path is limited to an allow-list baked into MIUISystemUIPlugin
+            // (click_direct_intent_packages).
+            if (alarmLabel != null) notifBuilder.setContentIntent(showAlarmsIntent())
 
             notifBuilder.addExtras(data.resources)
 
@@ -370,6 +468,28 @@ class PermanentIslandManager(
             Log.e(TAG, "Error dispatching permanent island", e)
         }
     }
+
+    private fun nextAlarmMillis(): Long? {
+        val system = context.getSystemService(AlarmManager::class.java)?.nextAlarmClock
+        return NextAlarmPillPolicy.alarmTime(
+            xiaomiClockMillis = runCatching {
+                Settings.Global.getLong(context.contentResolver, NextAlarmPillPolicy.XIAOMI_NEXT_ALARM_KEY, 0L)
+            }.getOrNull(),
+            systemMillis = system?.triggerTime,
+            systemCreatorPackage = system?.showIntent?.creatorPackage
+        )
+    }
+
+    private fun showAlarmsIntent(): PendingIntent = PendingIntent.getActivity(
+        context,
+        0,
+        Intent(context, NextAlarmTapActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    private fun alarmIconBitmap(): Bitmap =
+        checkNotNull(ContextCompat.getDrawable(context, R.drawable.ic_island_alarm)).toBitmap(96, 96)
 
     private fun removePermanentIsland() {
         isPosted = false
