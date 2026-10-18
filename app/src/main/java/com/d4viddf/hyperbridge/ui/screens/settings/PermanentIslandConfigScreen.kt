@@ -50,12 +50,14 @@ fun PermanentIslandConfigScreen(
     val islandWidth by prefs.permanentIslandWidthFlow.collectAsState(initial = 0)
     val hideInLandscape by prefs.hidePermanentIslandLandscapeFlow.collectAsState(initial = false)
     val showOnLockscreen by prefs.permanentIslandOnLockscreenFlow.collectAsState(initial = false)
+    val showNextAlarm by prefs.permanentIslandNextAlarmFlow.collectAsState(initial = false)
 
     PermanentIslandConfigContent(
         isEnabled = isEnabled,
         islandWidth = islandWidth,
         hideInLandscape = hideInLandscape,
         showOnLockscreen = showOnLockscreen,
+        showNextAlarm = showNextAlarm,
         onEnabledChange = { checked ->
             scope.launch {
                 prefs.setPermanentIslandEnabled(checked)
@@ -76,6 +78,11 @@ fun PermanentIslandConfigScreen(
                 prefs.setPermanentIslandOnLockscreen(show)
             }
         },
+        onShowNextAlarmChange = { show ->
+            scope.launch {
+                prefs.setPermanentIslandNextAlarm(show)
+            }
+        },
         onBack = onBack
     )
 }
@@ -91,6 +98,8 @@ fun PermanentIslandConfigContent(
     onWidthChange: (Int) -> Unit,
     onHideInLandscapeChange: (Boolean) -> Unit,
     onShowOnLockscreenChange: (Boolean) -> Unit,
+    showNextAlarm: Boolean = false,
+    onShowNextAlarmChange: (Boolean) -> Unit = {},
     onBack: () -> Unit
 ) {
     var sliderValue by androidx.compose.runtime.remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
@@ -207,6 +216,30 @@ fun PermanentIslandConfigContent(
                             Switch(
                                 checked = showOnLockscreen,
                                 onCheckedChange = onShowOnLockscreenChange
+                            )
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                Text(
+                                    text = stringResource(R.string.permanent_island_next_alarm),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                                )
+                                Text(
+                                    text = stringResource(R.string.permanent_island_next_alarm_desc),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = showNextAlarm,
+                                onCheckedChange = onShowNextAlarmChange
                             )
                         }
                     }
