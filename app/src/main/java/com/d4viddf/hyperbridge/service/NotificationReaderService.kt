@@ -2707,6 +2707,7 @@ class NotificationReaderService : NotificationListenerService() {
         DiagnosticsStore.setServiceConnected(false)
         if (::vpnIslandController.isInitialized) vpnIslandController.stop()
         if (::chargingIslandController.isInitialized) chargingIslandController.stop()
+        if (::permanentIslandManager.isInitialized) permanentIslandManager.stop()
         unregisterReceiver(systemReceiver)
         unregisterReceiver(islandClickReceiver)
         syncJob?.cancel()

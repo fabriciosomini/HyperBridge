@@ -30,4 +30,8 @@ class HyperIslandProtocolExtensionsTest {
             .getAsJsonObject("param_v2").getAsJsonObject("param_island")
         assertEquals(0, island["islandProperty"].asInt)
     }
+
+    @Test(expected = IllegalArgumentException::class) fun rejectsNegativeProperty() {
+        HyperIslandProtocolOptions(islandProperty = -1)
+    }
 }
