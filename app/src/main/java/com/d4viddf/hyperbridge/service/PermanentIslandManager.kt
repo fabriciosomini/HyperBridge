@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.PowerManager
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
@@ -53,17 +54,38 @@ class PermanentIslandManager(
     private var showOnLockscreen = false
     private var isKeyguardLocked = false
     private var pendingDispatchJob: Job? = null
+    // Whether 9999 is posted right now, so a dispatch can tell a fresh add from an in-place update.
+    private var isPosted = false
+    // A fresh add that came up while the screen was off, held until SCREEN_ON.
+    private var addOnScreenOn = false
 
     private val keyguardManager = context.getSystemService(KeyguardManager::class.java)
+    private val powerManager = context.getSystemService(PowerManager::class.java)
 
     // KeyguardLockedStateListener needs the privileged SUBSCRIBE_TO_KEYGUARD_LOCKED_STATE, so lock
     // state is re-queried on SCREEN_ON / USER_PRESENT instead. SCREEN_OFF is deliberately ignored:
     // an island added while the screen is off keeps a hidden view after wake (neither an in-place
     // update nor leaving it alone brings it back), so the keyguard pill is posted on SCREEN_ON.
+    // The same holds for every other fresh add (e.g. the re-post after a WhatsApp island ends with
+    // the screen off), so dispatchPermanentIsland holds those and they are posted here too.
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val locked = keyguardManager?.isKeyguardLocked == true
             synchronized(this@PermanentIslandManager) {
+                if (addOnScreenOn && intent.action == Intent.ACTION_SCREEN_ON) {
+                    isKeyguardLocked = locked
+                    addOnScreenOn = false
+                    if (isIslandActive && desiredActive()) {
+                        // Nothing was cancelled just before, so post without the anti-swallow delay.
+                        val jobToCancel = pendingDispatchJob
+                        pendingDispatchJob = null
+                        jobToCancel?.cancel()
+                        dispatchPermanentIsland()
+                    } else {
+                        updateStateLocked()
+                    }
+                    return
+                }
                 if (isKeyguardLocked == locked) return
                 isKeyguardLocked = locked
                 if (locked && !isIslandActive && desiredActive()) {
@@ -197,6 +219,7 @@ class PermanentIslandManager(
             return
         }
         isIslandActive = isIslandPresent
+        isPosted = isIslandPresent
         Log.d(TAG, "updateState: shouldShow=$shouldShow, isLandscape=$isLandscape, isHideInLandscapeEnabled=$isHideInLandscapeEnabled")
         updateStateLocked()
     }
@@ -235,6 +258,11 @@ class PermanentIslandManager(
     }
     @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
     private fun dispatchPermanentIsland() {
+        if (!isPosted && powerManager?.isInteractive == false) {
+            Log.d(TAG, "Screen off: holding the permanent island until SCREEN_ON")
+            addOnScreenOn = true
+            return
+        }
         try {
             Log.d(TAG, "Dispatching permanent island")
             
@@ -277,12 +305,15 @@ class PermanentIslandManager(
             notification.extras.putString("miui.focus.param", data.jsonParam)
 
             ShizukuManager.notify(context, PERMANENT_BRIDGE_ID, notification)
+            isPosted = true
         } catch (e: Exception) {
             Log.e(TAG, "Error dispatching permanent island", e)
         }
     }
 
     private fun removePermanentIsland() {
+        isPosted = false
+        addOnScreenOn = false
         try {
             Log.d(TAG, "Removing permanent island")
             ShizukuManager.cancel(context, PERMANENT_BRIDGE_ID)
