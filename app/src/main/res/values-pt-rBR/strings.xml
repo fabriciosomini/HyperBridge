@@ -47,6 +47,9 @@
     <string name="permanent_island_hide_landscape">Ocultar na Horizontal</string>
     <string name="permanent_island_lockscreen">Mostrar na Tela de Bloqueio</string>
     <string name="permanent_island_lockscreen_desc">Mantém a cápsula visível enquanto o telefone está bloqueado. Testado no HyperOS 4; pode não aparecer com a Tela sempre ativa ativada.</string>
+    <string name="permanent_island_next_alarm">Mostrar Próximo Alarme</string>
+    <string name="permanent_island_next_alarm_desc">Mostra o próximo alarme na cápsula quando faltam menos de 12 horas.</string>
+    <string name="permanent_island_next_alarm_in">Alarme em %1$d h %2$d min</string>
     <string name="group_about">Sobre</string>
     <string name="special_thanks">Special Thanks</string>
     <string name="developer">Desenvolvedor</string>
