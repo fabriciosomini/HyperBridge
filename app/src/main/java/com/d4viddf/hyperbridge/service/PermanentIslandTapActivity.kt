@@ -8,21 +8,25 @@ import android.provider.AlarmClock
 import android.util.Log
 
 /**
- * Invisible landing point for a tap on the next-alarm card of the Permanent Island.
+ * Invisible landing point for a tap on the Permanent Island's next-alarm or weather card.
  *
- * Opening the clock from the island leaves the pill in HyperOS's "app opened from island" state,
+ * Opening an app from the island leaves the pill in HyperOS's "app opened from island" state,
  * which hides it until the next re-post (up to a minute). Going through this activity makes the
  * tap an event we see, so the pill is re-posted right away.
  */
-class NextAlarmTapActivity : Activity() {
+class PermanentIslandTapActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        val target = when (intent.getStringExtra(EXTRA_TARGET)) {
+            TARGET_WEATHER -> packageManager.getLaunchIntentForPackage(WeatherRepository.XIAOMI_WEATHER_PACKAGE)
+            else -> Intent(AlarmClock.ACTION_SHOW_ALARMS)
+        }
         try {
-            startActivity(Intent(AlarmClock.ACTION_SHOW_ALARMS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            if (target != null) startActivity(target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (e: ActivityNotFoundException) {
-            Log.e("HyperBridge", "No app handles ACTION_SHOW_ALARMS", e)
+            Log.e("HyperBridge", "No app handles $target", e)
         }
 
         sendBroadcast(Intent(ACTION_REPOST_PERMANENT_ISLAND).setPackage(packageName))
@@ -34,5 +38,8 @@ class NextAlarmTapActivity : Activity() {
 
     companion object {
         const val ACTION_REPOST_PERMANENT_ISLAND = "com.d4viddf.hyperbridge.REPOST_PERMANENT_ISLAND"
+        const val EXTRA_TARGET = "target"
+        const val TARGET_ALARMS = "alarms"
+        const val TARGET_WEATHER = "weather"
     }
 }

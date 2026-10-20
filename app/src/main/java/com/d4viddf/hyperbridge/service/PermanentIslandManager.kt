@@ -34,6 +34,7 @@ import com.d4viddf.hyperbridge.models.HyperIslandData
 import com.d4viddf.hyperbridge.models.widget.CustomWidgetDocument
 import com.d4viddf.hyperbridge.service.widget.CustomWidgetRenderer
 import com.d4viddf.hyperbridge.util.ShizukuManager
+import io.github.d4viddf.hyperisland_kit.HyperAction
 import io.github.d4viddf.hyperisland_kit.HyperIslandNotification
 import io.github.d4viddf.hyperisland_kit.HyperPicture
 import io.github.d4viddf.hyperisland_kit.models.ImageTextInfoLeft
@@ -46,6 +47,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.time.ZoneId
+import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
 
 
@@ -59,6 +61,8 @@ class PermanentIslandManager(
     companion object {
         const val PERMANENT_BRIDGE_ID = 9999
         private const val NEXT_ALARM_PIC = "next_alarm"
+        private const val WEATHER_PIC = "weather"
+        const val ACTION_NEXT_PERMANENT_ISLAND = "com.d4viddf.hyperbridge.NEXT_PERMANENT_ISLAND"
         // The dismiss path posts 9999 right after cancelling the previous focus
         // island. Delaying the post lets HyperOS finish tearing that island down,
         // otherwise it can swallow the re-post and leave 9999 posted but hidden.
@@ -75,6 +79,10 @@ class PermanentIslandManager(
     private var isHideInLandscapeEnabled = false
     private var showOnLockscreen = false
     private var showNextAlarm = false
+    private var showWeather = false
+    private var rotationJob: Job? = null
+    // Set by the card's "Next" button: swaps which minutes show the alarm and which the weather.
+    private var rotationFlipped = false
     private var isKeyguardLocked = false
     private var pendingDispatchJob: Job? = null
     // Whether 9999 is posted right now, so a dispatch can tell a fresh add from an in-place update.
@@ -136,14 +144,23 @@ class PermanentIslandManager(
     // An alarm set, changed or dismissed re-renders the pill at once; the 1-minute sync tick
     // re-dispatches too, which covers an alarm moving into the 12 h window.
     private val nextAlarmReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) = onNextAlarmChanged()
+        override fun onReceive(context: Context, intent: Intent) = onPillContentChanged()
     }
     // Xiaomi's clock app rewrites its next-alarm setting whenever its alarms change.
     private val nextAlarmObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
-        override fun onChange(selfChange: Boolean) = onNextAlarmChanged()
+        override fun onChange(selfChange: Boolean) = onPillContentChanged()
+    }
+    // The expanded card's "Next" button: show the other content now; the rotation carries on.
+    private val nextContentReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            synchronized(this@PermanentIslandManager) {
+                rotationFlipped = !rotationFlipped
+                if (isIslandActive) dispatchPermanentIsland()
+            }
+        }
     }
 
-    // Sent by NextAlarmTapActivity: opening the clock from the card hides the pill ("app opened
+    // Sent by PermanentIslandTapActivity: opening the clock from the card hides the pill ("app opened
     // from island"), and only a fresh add clears that, so cancel and post again.
     private val repostReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -156,9 +173,26 @@ class PermanentIslandManager(
         }
     }
 
-    private fun onNextAlarmChanged() {
+    private fun onPillContentChanged() {
         synchronized(this) {
-            if (isIslandActive && showNextAlarm) dispatchPermanentIsland()
+            if (isIslandActive && (showNextAlarm || showWeather)) dispatchPermanentIsland()
+        }
+    }
+
+    // With both the alarm and the weather on, the pill switches between them on each minute
+    // boundary (WeatherPillPolicy.pick). The 1-minute sync tick isn't aligned to the minute, so it
+    // can't drive this; it re-dispatches the same content within a minute anyway.
+    private fun updateRotationLocked() {
+        val rotate = showNextAlarm && showWeather
+        if (rotate == (rotationJob != null)) return
+        rotationJob?.cancel()
+        rotationJob = if (!rotate) null else scope.launch {
+            while (true) {
+                delay(WeatherPillPolicy.untilNextRotation(System.currentTimeMillis()).milliseconds)
+                synchronized(this@PermanentIslandManager) {
+                    if (isIslandActive && pendingDispatchJob == null) dispatchPermanentIsland()
+                }
+            }
         }
     }
 
@@ -172,11 +206,17 @@ class PermanentIslandManager(
         ContextCompat.registerReceiver(
             context,
             repostReceiver,
-            IntentFilter(NextAlarmTapActivity.ACTION_REPOST_PERMANENT_ISLAND),
+            IntentFilter(PermanentIslandTapActivity.ACTION_REPOST_PERMANENT_ISLAND),
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
         context.contentResolver.registerContentObserver(
             Settings.Global.getUriFor(NextAlarmPillPolicy.XIAOMI_NEXT_ALARM_KEY), false, nextAlarmObserver
+        )
+        ContextCompat.registerReceiver(
+            context,
+            nextContentReceiver,
+            IntentFilter(ACTION_NEXT_PERMANENT_ISLAND),
+            ContextCompat.RECEIVER_NOT_EXPORTED
         )
 
         scope.launch {
@@ -234,6 +274,20 @@ class PermanentIslandManager(
                 synchronized(this@PermanentIslandManager) {
                     if (showNextAlarm != show) {
                         showNextAlarm = show
+                        updateRotationLocked()
+                        if (isIslandActive) {
+                            dispatchPermanentIsland()
+                        }
+                    }
+                }
+            }
+        }
+        scope.launch {
+            preferences.permanentIslandWeatherFlow.collectLatest { show ->
+                synchronized(this@PermanentIslandManager) {
+                    if (showWeather != show) {
+                        showWeather = show
+                        updateRotationLocked()
                         if (isIslandActive) {
                             dispatchPermanentIsland()
                         }
@@ -303,6 +357,11 @@ class PermanentIslandManager(
         runCatching { context.unregisterReceiver(screenReceiver) }
         runCatching { context.unregisterReceiver(nextAlarmReceiver) }
         runCatching { context.contentResolver.unregisterContentObserver(nextAlarmObserver) }
+        runCatching { context.unregisterReceiver(nextContentReceiver) }
+        synchronized(this) {
+            rotationJob?.cancel()
+            rotationJob = null
+        }
         runCatching { context.unregisterReceiver(repostReceiver) }
     }
 
@@ -380,13 +439,34 @@ class PermanentIslandManager(
             builder.setIslandFirstFloat(false)
 
             val widgetDoc = currentCustomWidgetDoc
+            val now = System.currentTimeMillis()
             val alarmMillis = if (showNextAlarm && widgetDoc == null) nextAlarmMillis() else null
             val alarmLabel = NextAlarmPillPolicy.label(
                 triggerAtMillis = alarmMillis,
-                nowMillis = System.currentTimeMillis(),
+                nowMillis = now,
                 is24Hour = DateFormat.is24HourFormat(context),
                 zone = ZoneId.systemDefault()
             )
+            if (showWeather && widgetDoc == null) {
+                WeatherRepository.refreshIfStale(context, scope, ::onPillContentChanged)
+            }
+            val weather = if (showWeather && widgetDoc == null) WeatherRepository.current else null
+            val weatherLabel = weather?.let { WeatherPillPolicy.label(it.reading.temperature, it.fetchedAtMillis, now) }
+            val hasAlarm = alarmLabel != null && alarmMillis != null
+            val hasWeather = weatherLabel != null
+            val content = WeatherPillPolicy.pick(hasAlarm, hasWeather, now, rotationFlipped)
+            // The card's "Next" button, only when there is something to switch to.
+            if (hasAlarm && hasWeather) {
+                builder.addAction(
+                    HyperAction(
+                        key = "permanent_island_next",
+                        title = context.getString(R.string.permanent_island_next),
+                        pendingIntent = nextContentIntent(),
+                        actionIntentType = 1,
+                        titleColor = "#FFFFFF"
+                    )
+                )
+            }
             if (widgetDoc != null) {
                 // #273 "island content sources": render the bound micro-widget instead of the
                 // blank spacer, so e.g. a weather app driving {source.weather.text} shows on the
@@ -410,7 +490,7 @@ class PermanentIslandManager(
                 builder.setCustomIslandExpandRemoteView(widgetView)
                 builder.setSmallIsland("")
             } else {
-                if (alarmLabel != null && alarmMillis != null) {
+                if (content == WeatherPillPolicy.Content.ALARM && alarmLabel != null && alarmMillis != null) {
                     // Icon on the left, plain text on the right. bigIslandArea.textInfo becomes the
                     // plugin's moduleText; an imageTextInfoRight of type 1 is skipped on the right.
                     builder.addPicture(HyperPicture(NEXT_ALARM_PIC, alarmIconBitmap()))
@@ -419,11 +499,33 @@ class PermanentIslandManager(
                         centerText = TextInfo(alarmLabel)
                     )
                     // The card a tap expands the pill into; tapping it opens the alarm list.
-                    val (hoursLeft, minutesLeft) = NextAlarmPillPolicy.timeLeft(alarmMillis, System.currentTimeMillis())
+                    val (hoursLeft, minutesLeft) = NextAlarmPillPolicy.timeLeft(alarmMillis, now)
                     builder.setBaseInfo(
                         title = DateFormat.getTimeFormat(context).format(java.util.Date(alarmMillis)),
                         content = context.getString(R.string.permanent_island_next_alarm_in, hoursLeft, minutesLeft),
                         pictureKey = NEXT_ALARM_PIC
+                    )
+                } else if (content == WeatherPillPolicy.Content.WEATHER && weather != null && weatherLabel != null) {
+                    // Same layout as the alarm: the condition icon, then the temperature.
+                    val reading = weather.reading
+                    val icon = WeatherRepository.icon(context, WeatherPillPolicy.iconName(reading.weatherCode, reading.isDay))
+                    builder.addPicture(HyperPicture(WEATHER_PIC, icon))
+                    builder.setBigIslandInfo(
+                        left = ImageTextInfoLeft(1, PicInfo(1, WEATHER_PIC), TextInfo("", "")),
+                        centerText = TextInfo(weatherLabel)
+                    )
+                    builder.setBaseInfo(
+                        title = listOfNotNull(
+                            weatherLabel,
+                            WeatherPillPolicy.descriptionRes(reading.weatherCode)?.let(context::getString)
+                        ).joinToString(" · "),
+                        content = listOfNotNull(
+                            weather.city,
+                            if (reading.high != null && reading.low != null) {
+                                "↑${reading.high.roundToInt()}° ↓${reading.low.roundToInt()}°"
+                            } else null
+                        ).joinToString(" · "),
+                        pictureKey = WEATHER_PIC
                     )
                 } else {
                     // Only big paramislands with empty values for textonleft and picKey = null
@@ -451,11 +553,16 @@ class PermanentIslandManager(
                 .setContentText("Empty Island")
                 .setPriority(NotificationCompat.PRIORITY_MIN)
                 .setOngoing(true)
-            // Opens the clock's alarm list via NextAlarmTapActivity, which also re-posts the pill.
+            // Opens the clock's alarm list or Xiaomi Weather via PermanentIslandTapActivity, which
+            // also re-posts the pill.
             // HyperOS only sends this from the expanded island: a tap on the collapsed pill expands
             // it, and the direct-tap path is limited to an allow-list baked into MIUISystemUIPlugin
             // (click_direct_intent_packages).
-            if (alarmLabel != null) notifBuilder.setContentIntent(showAlarmsIntent())
+            when (content) {
+                WeatherPillPolicy.Content.ALARM -> notifBuilder.setContentIntent(tapIntent(PermanentIslandTapActivity.TARGET_ALARMS))
+                WeatherPillPolicy.Content.WEATHER -> notifBuilder.setContentIntent(tapIntent(PermanentIslandTapActivity.TARGET_WEATHER))
+                null -> Unit
+            }
 
             notifBuilder.addExtras(data.resources)
 
@@ -480,10 +587,19 @@ class PermanentIslandManager(
         )
     }
 
-    private fun showAlarmsIntent(): PendingIntent = PendingIntent.getActivity(
+    private fun nextContentIntent(): PendingIntent = PendingIntent.getBroadcast(
         context,
-        0,
-        Intent(context, NextAlarmTapActivity::class.java)
+        2,
+        Intent(ACTION_NEXT_PERMANENT_ISLAND).setPackage(context.packageName),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    // One request code per target, so FLAG_UPDATE_CURRENT doesn't rewrite the other's extra.
+    private fun tapIntent(target: String): PendingIntent = PendingIntent.getActivity(
+        context,
+        if (target == PermanentIslandTapActivity.TARGET_WEATHER) 1 else 0,
+        Intent(context, PermanentIslandTapActivity::class.java)
+            .putExtra(PermanentIslandTapActivity.EXTRA_TARGET, target)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
