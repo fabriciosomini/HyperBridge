@@ -45,6 +45,8 @@
     <string name="permanent_island_screen_desc">Shows an empty Dynamic Island capsule permanently when no active notifications are present.</string>
     <string name="permanent_island_width">Largura da ilha</string>
     <string name="permanent_island_hide_landscape">Ocultar na Horizontal</string>
+    <string name="permanent_island_lockscreen">Mostrar na Tela de Bloqueio</string>
+    <string name="permanent_island_lockscreen_desc">Mantém a cápsula visível enquanto o telefone está bloqueado. Testado no HyperOS 4; pode não aparecer com a Tela sempre ativa ativada.</string>
     <string name="group_about">Sobre</string>
     <string name="special_thanks">Special Thanks</string>
     <string name="developer">Desenvolvedor</string>
