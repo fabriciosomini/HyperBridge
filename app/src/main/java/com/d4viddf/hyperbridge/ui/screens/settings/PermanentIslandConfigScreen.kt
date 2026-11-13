@@ -1,5 +1,7 @@
 package com.d4viddf.hyperbridge.ui.screens.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Card
@@ -34,6 +38,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.d4viddf.hyperbridge.R
 import com.d4viddf.hyperbridge.data.AppPreferences
+import com.d4viddf.hyperbridge.service.WeatherRepository
 import com.d4viddf.hyperbridge.ui.components.PermanentIslandPreview
 import com.d4viddf.hyperbridge.ui.theme.HyperBridgeTheme
 import kotlinx.coroutines.launch
@@ -51,6 +56,24 @@ fun PermanentIslandConfigScreen(
     val hideInLandscape by prefs.hidePermanentIslandLandscapeFlow.collectAsState(initial = false)
     val showOnLockscreen by prefs.permanentIslandOnLockscreenFlow.collectAsState(initial = false)
     val showNextAlarm by prefs.permanentIslandNextAlarmFlow.collectAsState(initial = false)
+    val showWeather by prefs.permanentIslandWeatherFlow.collectAsState(initial = false)
+    // Weather comes from Open-Meteo at the approximate location, so turning it on asks for that.
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            WeatherRepository.captureLocation(context)
+            scope.launch { prefs.setPermanentIslandWeather(true) }
+        }
+    }
+    // The island works in the background, where Android only offers the last known location, so
+    // take a fresh fix whenever this screen is open with the weather on (and ask again if the
+    // permission was revoked, since the weather can't work without it).
+    androidx.compose.runtime.LaunchedEffect(showWeather) {
+        if (!showWeather) return@LaunchedEffect
+        if (WeatherRepository.hasLocationPermission(context)) WeatherRepository.captureLocation(context)
+        else locationPermissionLauncher.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+    }
 
     PermanentIslandConfigContent(
         isEnabled = isEnabled,
@@ -58,6 +81,7 @@ fun PermanentIslandConfigScreen(
         hideInLandscape = hideInLandscape,
         showOnLockscreen = showOnLockscreen,
         showNextAlarm = showNextAlarm,
+        showWeather = showWeather,
         onEnabledChange = { checked ->
             scope.launch {
                 prefs.setPermanentIslandEnabled(checked)
@@ -83,6 +107,15 @@ fun PermanentIslandConfigScreen(
                 prefs.setPermanentIslandNextAlarm(show)
             }
         },
+        onShowWeatherChange = { show ->
+            if (show && !WeatherRepository.hasLocationPermission(context)) {
+                locationPermissionLauncher.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+            } else {
+                scope.launch {
+                    prefs.setPermanentIslandWeather(show)
+                }
+            }
+        },
         onBack = onBack
     )
 }
@@ -100,6 +133,8 @@ fun PermanentIslandConfigContent(
     onShowOnLockscreenChange: (Boolean) -> Unit,
     showNextAlarm: Boolean = false,
     onShowNextAlarmChange: (Boolean) -> Unit = {},
+    showWeather: Boolean = false,
+    onShowWeatherChange: (Boolean) -> Unit = {},
     onBack: () -> Unit
 ) {
     var sliderValue by androidx.compose.runtime.remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
@@ -133,50 +168,18 @@ fun PermanentIslandConfigContent(
 
             Spacer(Modifier.height(24.dp))
 
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
-                modifier = Modifier.fillMaxWidth()
+            // The preview stays put; the settings below it scroll once they outgrow the screen.
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
             ) {
-                Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = stringResource(R.string.permanent_island_title),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
-                            )
-                        }
-                        Switch(
-                            checked = isEnabled,
-                            onCheckedChange = onEnabledChange
-                        )
-                    }
-                    
-                    if (isEnabled) {
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            text = stringResource(R.string.permanent_island_width),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
-                        )
-                        Slider(
-                            value = sliderValue,
-                            onValueChange = { value ->
-                                isDragging = true
-                                sliderValue = value
-                                onWidthChange(value.toInt())
-                            },
-                            onValueChangeFinished = {
-                                isDragging = false
-                            },
-                            valueRange = 0f..20f
-                        )
-                        Spacer(Modifier.height(16.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -184,73 +187,133 @@ fun PermanentIslandConfigContent(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = stringResource(R.string.permanent_island_hide_landscape),
-                                    style = MaterialTheme.typography.titleSmall,
+                                    text = stringResource(R.string.permanent_island_title),
+                                    style = MaterialTheme.typography.titleMedium,
                                     fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
                                 )
                             }
                             Switch(
-                                checked = hideInLandscape,
-                                onCheckedChange = onHideInLandscapeChange
+                                checked = isEnabled,
+                                onCheckedChange = onEnabledChange
                             )
                         }
-
-                        Spacer(Modifier.height(16.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                Text(
-                                    text = stringResource(R.string.permanent_island_lockscreen),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
-                                )
-                                Text(
-                                    text = stringResource(R.string.permanent_island_lockscreen_desc),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                        
+                        if (isEnabled) {
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                text = stringResource(R.string.permanent_island_width),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                            )
+                            Slider(
+                                value = sliderValue,
+                                onValueChange = { value ->
+                                    isDragging = true
+                                    sliderValue = value
+                                    onWidthChange(value.toInt())
+                                },
+                                onValueChangeFinished = {
+                                    isDragging = false
+                                },
+                                valueRange = 0f..20f
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = stringResource(R.string.permanent_island_hide_landscape),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                                    )
+                                }
+                                Switch(
+                                    checked = hideInLandscape,
+                                    onCheckedChange = onHideInLandscapeChange
                                 )
                             }
-                            Switch(
-                                checked = showOnLockscreen,
-                                onCheckedChange = onShowOnLockscreenChange
-                            )
-                        }
-
-                        Spacer(Modifier.height(16.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                Text(
-                                    text = stringResource(R.string.permanent_island_next_alarm),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
-                                )
-                                Text(
-                                    text = stringResource(R.string.permanent_island_next_alarm_desc),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                            Spacer(Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.permanent_island_lockscreen),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.permanent_island_lockscreen_desc),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = showOnLockscreen,
+                                    onCheckedChange = onShowOnLockscreenChange
                                 )
                             }
-                            Switch(
-                                checked = showNextAlarm,
-                                onCheckedChange = onShowNextAlarmChange
-                            )
+                            Spacer(Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.permanent_island_next_alarm),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.permanent_island_next_alarm_desc),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = showNextAlarm,
+                                    onCheckedChange = onShowNextAlarmChange
+                                )
+                            }
+                            Spacer(Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.permanent_island_weather),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.permanent_island_weather_desc),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = showWeather,
+                                    onCheckedChange = onShowWeatherChange
+                                )
+                            }
                         }
                     }
                 }
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    text = stringResource(R.string.permanent_island_screen_desc),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            Spacer(Modifier.height(24.dp))
-            Text(
-                text = stringResource(R.string.permanent_island_screen_desc),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
