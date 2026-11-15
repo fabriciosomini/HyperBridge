@@ -59,6 +59,9 @@
     <string name="permanent_island_hide_landscape">Hide in Landscape</string>
     <string name="permanent_island_lockscreen">Show on Lock Screen</string>
     <string name="permanent_island_lockscreen_desc">Keep the capsule visible while the phone is locked. Tested on HyperOS 4; may not show when Always-on Display is enabled.</string>
+    <string name="permanent_island_next_alarm">Show Next Alarm</string>
+    <string name="permanent_island_next_alarm_desc">Show your next alarm on the capsule when it is less than 12 hours away.</string>
+    <string name="permanent_island_next_alarm_in">Alarm in %1$d h %2$d min</string>
 
     <string name="group_about">About</string>
     <string name="special_thanks">Special Thanks</string>
