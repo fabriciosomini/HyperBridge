@@ -148,4 +148,8 @@ class HyperIslandProtocolExtensionsTest {
         assertFalse("timerInfo should not exist for static digit", digitInfo.has("timerInfo"))
         assertEquals(true, digitInfo["showHighlightColor"].asBoolean)
     }
+
+    @Test(expected = IllegalArgumentException::class) fun rejectsNegativeProperty() {
+        HyperIslandProtocolOptions(islandProperty = -1)
+    }
 }
