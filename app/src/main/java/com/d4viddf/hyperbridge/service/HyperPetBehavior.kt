@@ -28,7 +28,7 @@ data class HyperPetLevels(val food: Float, val happiness: Float, val cleanness: 
  *
  * Food, happiness and cleanness each run from full to empty over [NEED_LASTS_MINUTES] of the dog's
  * waking day (06:00 to 22:00, nothing runs down while it sleeps), and one tap fills one up again.
- * They turn low after about five hours, so three visits a day keep it content. Energy follows the
+ * They turn low at half, after five and a half hours, so three visits a day keep it content. Energy follows the
  * clock: it runs down through the day and sleep fills it.
  *
  * Left alone the pet follows the clock ([HyperPetPill.clipAt]), moping every other clip while a
@@ -98,8 +98,8 @@ class HyperPetBehavior(needs: HyperPetNeeds, private val zone: ZoneId = ZoneId.s
     }
 
     companion object {
-        const val LOW = 0.35f
-        const val NEED_LASTS_MINUTES = 8 * 60
+        const val LOW = 0.5f
+        const val NEED_LASTS_MINUTES = 11 * 60
         private const val WAKE_MINUTE = 6 * 60
         private const val BED_MINUTE = 22 * 60
         private const val AWAKE_MINUTES_A_DAY = BED_MINUTE - WAKE_MINUTE

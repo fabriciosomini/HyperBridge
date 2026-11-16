@@ -55,21 +55,21 @@ class HyperPetBehaviorTest {
     }
 
     @Test
-    fun needsRunDownOverEightWakingHours() {
+    fun needsRunDownOverElevenWakingHours() {
         val pet = pet(at(8))
 
         assertEquals(1f, pet.levels(at(8)).lowest, 0.001f)
-        assertEquals(0.5f, pet.levels(at(12)).food, 0.001f)
-        assertEquals(0f, pet.levels(at(16)).cleanness, 0.001f)
-        assertEquals(0f, pet.levels(at(20)).happiness, 0.001f)
+        assertEquals(0.5f, pet.levels(at(13, 30)).food, 0.001f)
+        assertEquals(0f, pet.levels(at(19)).cleanness, 0.001f)
+        assertEquals(0f, pet.levels(at(21)).happiness, 0.001f)
     }
 
     @Test
     fun nothingRunsDownWhileTheDogSleeps() {
         val pet = pet(at(21, day = 10))
 
-        // An hour awake before bed, an hour after waking: two of the eight.
-        assertEquals(0.75f, pet.levels(at(7, day = 11)).food, 0.001f)
+        // An hour awake before bed, an hour after waking: two of the eleven.
+        assertEquals(1f - 2f / 11f, pet.levels(at(7, day = 11)).food, 0.001f)
         assertEquals(pet.levels(at(22, day = 10)), pet.levels(at(6, day = 11)).copy(energy = 0f))
     }
 
