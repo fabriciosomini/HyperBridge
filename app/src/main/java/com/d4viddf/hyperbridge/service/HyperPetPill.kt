@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.d4viddf.hyperbridge.R
+import java.time.LocalTime
 import kotlin.random.Random
 
 /**
@@ -15,15 +16,21 @@ import kotlin.random.Random
  * That is why the pet ships as an MP4 rendered from its Lottie source.
  *
  * Every dispatch of the island restarts the video, so the pet is posted again each time a clip
- * ends, with another clip. Every clip lasts [CLIP_MS] and starts and ends on the same idle pose,
- * with its moment in the middle, so the change of clip can't be seen. Keep that shape
- * (tools/hyper-pet) when adding clips.
+ * ends ([durationMs]), with another clip. The daytime ones start and end on the
+ * same idle pose, with their moment in the middle, so the change of clip can't be seen. Keep
+ * that shape (tools/hyper-pet) when adding clips.
  */
 object HyperPetPill {
     private const val PIC_TYPE_MP4 = 6
-    const val CLIP_MS = 15_000L
 
-    private val DAY_CLIPS = listOf(
+    /** How long [clip] plays before the next one is posted. tools/hyper-pet cuts them to this. */
+    fun durationMs(clip: Int): Long = when (clip) {
+        R.raw.hyper_pet_sleepy, R.raw.hyper_pet_asleep, R.raw.hyper_pet_wake_up, R.raw.hyper_pet_drowsy -> 15_000L
+        R.raw.hyper_pet_look_around, R.raw.hyper_pet_butterfly -> 12_000L
+        else -> 9_000L
+    }
+
+    val DAY_CLIPS = listOf(
         R.raw.hyper_pet_look_around,
         R.raw.hyper_pet_sniff_tilt,
         R.raw.hyper_pet_happy,
@@ -31,10 +38,27 @@ object HyperPetPill {
         R.raw.hyper_pet_butterfly,
         R.raw.hyper_pet_bone,
     )
-    private val NIGHT_CLIPS = DAY_CLIPS + R.raw.hyper_pet_sleepy
 
-    /** The clips to pick from at [hourOfDay]: the dog only dozes off from 22:00 to 06:00. */
-    fun clipsAt(hourOfDay: Int): List<Int> = if (hourOfDay >= 22 || hourOfDay < 6) NIGHT_CLIPS else DAY_CLIPS
+    private val BEDTIME = LocalTime.of(22, 0)
+    private val DROWSY_TIME = LocalTime.of(21, 45)
+    private val WAKE_TIME = LocalTime.of(6, 0)
+
+    /**
+     * The clip to play at [time] after [previous]. From 22:00 to 06:00 the dog sleeps: it falls
+     * asleep once (sleepy ends asleep) and then stays asleep. The first clip of the day wakes it
+     * up ([wokeToday] says whether that has played), which is the first time the screen is on in
+     * the morning. It yawns its way through the quarter hour before bed, and the rest of the day
+     * it's a random clip.
+     */
+    fun clipAt(time: LocalTime, previous: Int?, wokeToday: Boolean, random: Random = Random): Int {
+        val wasAsleep = previous == R.raw.hyper_pet_sleepy || previous == R.raw.hyper_pet_asleep
+        return when {
+            time >= BEDTIME || time < WAKE_TIME -> if (wasAsleep) R.raw.hyper_pet_asleep else R.raw.hyper_pet_sleepy
+            wasAsleep || !wokeToday -> R.raw.hyper_pet_wake_up
+            time >= DROWSY_TIME -> R.raw.hyper_pet_drowsy
+            else -> nextClip(DAY_CLIPS, previous, random)
+        }
+    }
 
     /** A random clip, never the one that just played. */
     fun nextClip(clips: List<Int>, previous: Int?, random: Random = Random): Int =
@@ -45,12 +69,13 @@ object HyperPetPill {
     /**
      * Points the big island's left slot at [videoUri]. The toolkit prefixes every pic with
      * "miui.focus.pic_", which the video lookup doesn't want, so the picInfo is written here.
-     * Returns [json] untouched when it has no left slot to put the pet in.
+     * Works on both of the toolkit's JSONs. Returns [json] untouched when it has no left slot to put the pet in.
      */
     fun withPet(json: String, videoUri: String): String {
         val root = runCatching { JsonParser.parseString(json).asJsonObject }.getOrNull() ?: return json
-        val left = root.getAsJsonObject("param_v2")
-            ?.getAsJsonObject("param_island")
+        // The island sits under param_v2, or at the top of a custom view's JSON.
+        val left = (root.getAsJsonObject("param_v2") ?: root)
+            .getAsJsonObject("param_island")
             ?.getAsJsonObject("bigIslandArea")
             ?.getAsJsonObject("imageTextInfoLeft")
             ?: return json

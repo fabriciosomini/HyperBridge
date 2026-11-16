@@ -28,7 +28,7 @@ class Clip:
         self.name = source.stem
         self.anim = LottieAnimation.from_file(str(source))
         # The last frame equals the first, so stopping one step short makes the loop seamless.
-        self.frames = range(int(lottie["ip"]), int(lottie["op"]), round(lottie["fr"] / FPS))
+        self.frames = range(*lottie.get("span", (lottie["ip"], lottie["op"])), round(lottie["fr"] / FPS))
 
     def frame(self, n, size):
         return self.anim.render_pillow_frame(frame_num=n, width=size, height=size).convert("RGBA")
