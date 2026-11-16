@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The card the Hyper Pet's pill expands into: its name, how it is doing, and what it needs most. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="20dp"
+    android:paddingTop="12dp"
+    android:paddingEnd="20dp"
+    android:paddingBottom="12dp">
+
+    <!-- The card is about 170dp tall at most, so the button shares the name's row. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="32dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/hyper_pet_name"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="#FFFFFFFF"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/hyper_pet_button"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:layout_marginStart="12dp"
+            android:background="@drawable/hyper_pet_button"
+            android:gravity="center"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:textColor="#FFFFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="18dp"
+        android:layout_marginTop="4dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="26dp"
+            android:layout_height="wrap_content"
+            android:text="🍖"
+            android:includeFontPadding="false"
+            android:textSize="12sp" />
+
+        <ProgressBar
+            android:id="@+id/hyper_pet_food"
+            style="@android:style/Widget.ProgressBar.Horizontal"
+            android:layout_width="0dp"
+            android:layout_height="8dp"
+            android:layout_weight="1"
+            android:max="100"
+            android:progressDrawable="@drawable/hyper_pet_bar"
+            android:progressTint="#FFFFA94D" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="18dp"
+        android:layout_marginTop="4dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="26dp"
+            android:layout_height="wrap_content"
+            android:text="❤️"
+            android:includeFontPadding="false"
+            android:textSize="12sp" />
+
+        <ProgressBar
+            android:id="@+id/hyper_pet_happiness"
+            style="@android:style/Widget.ProgressBar.Horizontal"
+            android:layout_width="0dp"
+            android:layout_height="8dp"
+            android:layout_weight="1"
+            android:max="100"
+            android:progressDrawable="@drawable/hyper_pet_bar"
+            android:progressTint="#FFFF6B81" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="18dp"
+        android:layout_marginTop="4dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="26dp"
+            android:layout_height="wrap_content"
+            android:text="🛁"
+            android:includeFontPadding="false"
+            android:textSize="12sp" />
+
+        <ProgressBar
+            android:id="@+id/hyper_pet_cleanness"
+            style="@android:style/Widget.ProgressBar.Horizontal"
+            android:layout_width="0dp"
+            android:layout_height="8dp"
+            android:layout_weight="1"
+            android:max="100"
+            android:progressDrawable="@drawable/hyper_pet_bar"
+            android:progressTint="#FF74C0FC" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="18dp"
+        android:layout_marginTop="4dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="26dp"
+            android:layout_height="wrap_content"
+            android:text="⚡"
+            android:includeFontPadding="false"
+            android:textSize="12sp" />
+
+        <ProgressBar
+            android:id="@+id/hyper_pet_energy"
+            style="@android:style/Widget.ProgressBar.Horizontal"
+            android:layout_width="0dp"
+            android:layout_height="8dp"
+            android:layout_weight="1"
+            android:max="100"
+            android:progressDrawable="@drawable/hyper_pet_bar"
+            android:progressTint="#FFFFD43B" />
+    </LinearLayout>
+</LinearLayout>

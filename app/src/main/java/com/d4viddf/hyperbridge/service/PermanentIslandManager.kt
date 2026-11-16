@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.AlarmManager
 import android.app.KeyguardManager
 import android.app.PendingIntent
+import android.widget.RemoteViews
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -24,6 +25,7 @@ import com.d4viddf.hyperbridge.R
 import com.d4viddf.hyperbridge.data.AppPreferences
 import com.d4viddf.hyperbridge.integration.xiaomi.HyperIslandProtocolOptions
 import com.d4viddf.hyperbridge.integration.xiaomi.KEYGUARD_ISLAND_PROPERTY
+import com.d4viddf.hyperbridge.integration.xiaomi.buildCustomExtras
 import com.d4viddf.hyperbridge.integration.xiaomi.buildJsonParam
 import com.d4viddf.hyperbridge.models.HyperIslandData
 import com.d4viddf.hyperbridge.util.ShizukuManager
@@ -55,6 +57,9 @@ class PermanentIslandManager(
         private const val NEXT_ALARM_PIC = "next_alarm"
         private const val WEATHER_PIC = "weather"
         const val ACTION_NEXT_PERMANENT_ISLAND = "com.d4viddf.hyperbridge.NEXT_PERMANENT_ISLAND"
+        private const val ACTION_HYPER_PET = "com.d4viddf.hyperbridge.HYPER_PET"
+        private const val EXTRA_HYPER_PET_ACTION = "action"
+        private const val CUSTOM_PARAM = "miui.focus.param.custom"
         // The dismiss path posts 9999 right after cancelling the previous focus
         // island. Delaying the post lets HyperOS finish tearing that island down,
         // otherwise it can swallow the re-post and leave 9999 posted but hidden.
@@ -72,6 +77,23 @@ class PermanentIslandManager(
     private var showOnLockscreen = false
     private var showNextAlarm = false
     private var showWeather = false
+    private var showHyperPet = false
+    private var hyperPetName = ""
+    // Every dispatch restarts the pet's video, so each one asks this for the clip to play.
+    // Saved: when its needs were last met, and the day it last woke up (so a restart doesn't
+    // wake it again).
+    private val hyperPetPrefs = context.getSharedPreferences("hyper_pet", Context.MODE_PRIVATE)
+    private val hyperPet = System.currentTimeMillis().let { now ->
+        HyperPetBehavior(
+            HyperPetNeeds(
+                fedAt = hyperPetPrefs.getLong("fed_at", now),
+                lovedAt = hyperPetPrefs.getLong("loved_at", now),
+                bathedAt = hyperPetPrefs.getLong("bathed_at", now)
+            )
+        ).also { saveHyperPetNeeds(it.needs) }
+    }
+    // Posts the pet again when its clip ends. Active only while the pet is what the pill shows.
+    private var hyperPetJob: Job? = null
     private var rotationJob: Job? = null
     // Set by the card's "Next" button: swaps which minutes show the alarm and which the weather.
     private var rotationFlipped = false
@@ -145,6 +167,29 @@ class PermanentIslandManager(
         }
     }
 
+    // A button on the pet's card: play that right away. An update in place leaves the card open,
+    // over the pet, so the pill is cancelled and posted again, which brings it back collapsed.
+    private val hyperPetActionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val action = HyperPetAction.entries.firstOrNull { it.name == intent.getStringExtra(EXTRA_HYPER_PET_ACTION) }
+                ?: return
+            synchronized(this@PermanentIslandManager) {
+                hyperPet.request(action, System.currentTimeMillis())
+                saveHyperPetNeeds(hyperPet.needs)
+                if (isIslandActive) {
+                    removePermanentIsland()
+                    scheduleDispatchLocked()
+                }
+            }
+        }
+    }
+
+    private fun saveHyperPetNeeds(needs: HyperPetNeeds) = hyperPetPrefs.edit()
+        .putLong("fed_at", needs.fedAt)
+        .putLong("loved_at", needs.lovedAt)
+        .putLong("bathed_at", needs.bathedAt)
+        .apply()
+
     // Sent by PermanentIslandTapActivity: opening the clock from the card hides the pill ("app opened
     // from island"), and only a fresh add clears that, so cancel and post again.
     private val repostReceiver = object : BroadcastReceiver() {
@@ -196,6 +241,12 @@ class PermanentIslandManager(
         )
         context.contentResolver.registerContentObserver(
             Settings.Global.getUriFor(NextAlarmPillPolicy.XIAOMI_NEXT_ALARM_KEY), false, nextAlarmObserver
+        )
+        ContextCompat.registerReceiver(
+            context,
+            hyperPetActionReceiver,
+            IntentFilter(ACTION_HYPER_PET),
+            ContextCompat.RECEIVER_NOT_EXPORTED
         )
         ContextCompat.registerReceiver(
             context,
@@ -257,6 +308,27 @@ class PermanentIslandManager(
                         updateRotationLocked()
                         if (isIslandActive) {
                             dispatchPermanentIsland()
+                        }
+                    }
+                }
+            }
+        }
+        scope.launch {
+            preferences.hyperPetNameFlow.collectLatest { name ->
+                // Only the card shows the name, and the next clip's post carries it there.
+                synchronized(this@PermanentIslandManager) { hyperPetName = name }
+            }
+        }
+        scope.launch {
+            preferences.permanentIslandHyperPetFlow.collectLatest { show ->
+                synchronized(this@PermanentIslandManager) {
+                    if (showHyperPet != show) {
+                        showHyperPet = show
+                        // The plugin binds the left slot's renderer (bitmap or video) when the
+                        // island is added, so swap it with a fresh add.
+                        if (isIslandActive) {
+                            removePermanentIsland()
+                            scheduleDispatchLocked()
                         }
                     }
                 }
@@ -325,6 +397,7 @@ class PermanentIslandManager(
         runCatching { context.unregisterReceiver(nextAlarmReceiver) }
         runCatching { context.contentResolver.unregisterContentObserver(nextAlarmObserver) }
         runCatching { context.unregisterReceiver(nextContentReceiver) }
+        runCatching { context.unregisterReceiver(hyperPetActionReceiver) }
         synchronized(this) {
             rotationJob?.cancel()
             rotationJob = null
@@ -338,6 +411,11 @@ class PermanentIslandManager(
         hasNativeIsland = hasNative
         val shouldShow = desiredActive()
         val isLandscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        if (shouldShow && isIslandPresent && refresh && hyperPetJob?.isActive == true) {
+            // The pet is re-posted every clip anyway; re-asserting now would cut its clip short.
+            isIslandActive = true
+            return
+        }
         if (shouldShow && isIslandPresent && refresh) {
             // Present but maybe not visible: re-assert in place (no remove first, so no
             // rapid cancel->post to swallow). Same id + content updates the residual island.
@@ -478,16 +556,56 @@ class PermanentIslandManager(
                     left = ImageTextInfoLeft(1, null, TextInfo(emptyString, emptyString)),
                     right = null
                 )
+                if (showHyperPet) {
+                    // The card a tap expands the pet into, drawn by us: its name, a bar for each
+                    // level, and one button for what it needs most (the only tap we hear of).
+                    val levels = hyperPet.levels(now)
+                    val action = hyperPet.suggestedAction(now)
+                    val card = RemoteViews(context.packageName, R.layout.layout_hyper_pet_card).apply {
+                        setTextViewText(
+                            R.id.hyper_pet_name,
+                            hyperPetName.ifBlank { context.getString(R.string.hyper_pet_card_title) }
+                        )
+                        setProgressBar(R.id.hyper_pet_food, 100, (levels.food * 100).roundToInt(), false)
+                        setProgressBar(R.id.hyper_pet_happiness, 100, (levels.happiness * 100).roundToInt(), false)
+                        setProgressBar(R.id.hyper_pet_cleanness, 100, (levels.cleanness * 100).roundToInt(), false)
+                        setProgressBar(R.id.hyper_pet_energy, 100, (levels.energy * 100).roundToInt(), false)
+                        setTextViewText(R.id.hyper_pet_button, context.getString(action.title))
+                        setOnClickPendingIntent(R.id.hyper_pet_button, hyperPetIntent(action))
+                    }
+                    // HyperOS reads the expanded content from the island-expand slot, not from
+                    // the notification's custom view, so both are set (see CustomWidgetTranslator).
+                    builder.setCustomRemoteView(card)
+                    builder.setCustomIslandExpandRemoteView(card)
+                    builder.setHideDeco(true)
+                }
             }
             builder.setSmallIsland("")
 
-            val resourceBundle = builder.buildResourceBundle()
             // Property 0 keeps HyperOS drawing the pill over the keyguard; 1 is the toolkit default.
-            val islandProperty = if (showOnLockscreen) KEYGUARD_ISLAND_PROPERTY else 1
+            val options = HyperIslandProtocolOptions(islandProperty = if (showOnLockscreen) KEYGUARD_ISLAND_PROPERTY else 1)
+            val petShown = showHyperPet && content == null
+            // The pet's card is a custom view, which travels in its own extras with its own JSON.
+            val resourceBundle = if (petShown) builder.buildCustomExtras(options) else builder.buildResourceBundle()
+            val jsonParam = builder.buildJsonParam(options)
+            // The pet lives on the plain pill: the alarm and the weather keep their own icons.
+            var shownPetClip: Int? = null
             val data = HyperIslandData(
                 resourceBundle,
-                builder.buildJsonParam(HyperIslandProtocolOptions(islandProperty = islandProperty))
+                if (petShown) {
+                    val today = java.time.LocalDate.now().toString()
+                    val clip = hyperPet.next(now, hyperPetPrefs.getString("woke_on", null) == today)
+                    shownPetClip = clip
+                    if (clip == R.raw.hyper_pet_wake_up) hyperPetPrefs.edit().putString("woke_on", today).apply()
+                    Log.d(TAG, "Hyper Pet clip: ${context.resources.getResourceEntryName(clip)}")
+                    val video = HyperPetPill.videoUri(context.packageName, clip)
+                    resourceBundle.getString(CUSTOM_PARAM)?.let {
+                        resourceBundle.putString(CUSTOM_PARAM, HyperPetPill.withPet(it, video))
+                    }
+                    HyperPetPill.withPet(jsonParam, video)
+                } else jsonParam
             )
+            scheduleNextHyperPetClipLocked(shownPetClip)
 
             val notifBuilder = NotificationCompat.Builder(context, "hyper_bridge_notification_channel")
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
@@ -518,6 +636,21 @@ class PermanentIslandManager(
         }
     }
 
+    // Called with the lock held, from a dispatch: the clip that was just posted, if the pet is shown.
+    // With the screen off nothing is posted (no one would see it); the refresh on SCREEN_ON then
+    // finds the job done and posts the pet again.
+    private fun scheduleNextHyperPetClipLocked(clip: Int?) {
+        hyperPetJob?.cancel()
+        hyperPetJob = if (clip == null) null else scope.launch {
+            delay(HyperPetPill.durationMs(clip).milliseconds)
+            synchronized(this@PermanentIslandManager) {
+                if (isIslandActive && isPosted && pendingDispatchJob == null && powerManager?.isInteractive != false) {
+                    dispatchPermanentIsland()
+                }
+            }
+        }
+    }
+
     private fun nextAlarmMillis(): Long? {
         val system = context.getSystemService(AlarmManager::class.java)?.nextAlarmClock
         return NextAlarmPillPolicy.alarmTime(
@@ -536,6 +669,13 @@ class PermanentIslandManager(
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
+    private fun hyperPetIntent(action: HyperPetAction): PendingIntent = PendingIntent.getBroadcast(
+        context,
+        10 + action.ordinal,
+        Intent(ACTION_HYPER_PET).setPackage(context.packageName).putExtra(EXTRA_HYPER_PET_ACTION, action.name),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
     // One request code per target, so FLAG_UPDATE_CURRENT doesn't rewrite the other's extra.
     private fun tapIntent(target: String): PendingIntent = PendingIntent.getActivity(
         context,
@@ -551,6 +691,8 @@ class PermanentIslandManager(
 
     private fun removePermanentIsland() {
         isPosted = false
+        hyperPetJob?.cancel()
+        hyperPetJob = null
         addOnScreenOn = false
         try {
             Log.d(TAG, "Removing permanent island")

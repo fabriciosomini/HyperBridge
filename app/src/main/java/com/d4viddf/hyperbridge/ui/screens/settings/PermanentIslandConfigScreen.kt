@@ -20,6 +20,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -28,6 +29,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -57,6 +60,8 @@ fun PermanentIslandConfigScreen(
     val showOnLockscreen by prefs.permanentIslandOnLockscreenFlow.collectAsState(initial = false)
     val showNextAlarm by prefs.permanentIslandNextAlarmFlow.collectAsState(initial = false)
     val showWeather by prefs.permanentIslandWeatherFlow.collectAsState(initial = false)
+    val showHyperPet by prefs.permanentIslandHyperPetFlow.collectAsState(initial = false)
+    val hyperPetName by prefs.hyperPetNameFlow.collectAsState(initial = "")
     // Weather comes from Open-Meteo at the approximate location, so turning it on asks for that.
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -82,6 +87,14 @@ fun PermanentIslandConfigScreen(
         showOnLockscreen = showOnLockscreen,
         showNextAlarm = showNextAlarm,
         showWeather = showWeather,
+        showHyperPet = showHyperPet,
+        onShowHyperPetChange = { show ->
+            scope.launch {
+                prefs.setPermanentIslandHyperPet(show)
+            }
+        },
+        hyperPetName = hyperPetName,
+        onHyperPetNameChange = { name -> scope.launch { prefs.setHyperPetName(name) } },
         onEnabledChange = { checked ->
             scope.launch {
                 prefs.setPermanentIslandEnabled(checked)
@@ -120,6 +133,8 @@ fun PermanentIslandConfigScreen(
     )
 }
 
+private const val HYPER_PET_NAME_MAX_LENGTH = 20
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PermanentIslandConfigContent(
@@ -135,6 +150,10 @@ fun PermanentIslandConfigContent(
     onShowNextAlarmChange: (Boolean) -> Unit = {},
     showWeather: Boolean = false,
     onShowWeatherChange: (Boolean) -> Unit = {},
+    showHyperPet: Boolean = false,
+    onShowHyperPetChange: (Boolean) -> Unit = {},
+    hyperPetName: String = "",
+    onHyperPetNameChange: (String) -> Unit = {},
     onBack: () -> Unit
 ) {
     var sliderValue by androidx.compose.runtime.remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
@@ -302,6 +321,46 @@ fun PermanentIslandConfigContent(
                                 Switch(
                                     checked = showWeather,
                                     onCheckedChange = onShowWeatherChange
+                                )
+                            }
+                            Spacer(Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.permanent_island_hyper_pet),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.permanent_island_hyper_pet_desc),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = showHyperPet,
+                                    onCheckedChange = onShowHyperPetChange
+                                )
+                            }
+                            if (showHyperPet) {
+                                // What is typed is kept here, so the cursor doesn't wait on the save.
+                                var nameDraft by remember { mutableStateOf<String?>(null) }
+                                Spacer(Modifier.height(12.dp))
+                                OutlinedTextField(
+                                    value = nameDraft ?: hyperPetName,
+                                    onValueChange = { typed ->
+                                        val name = typed.take(HYPER_PET_NAME_MAX_LENGTH)
+                                        nameDraft = name
+                                        onHyperPetNameChange(name.trim())
+                                    },
+                                    label = { Text(stringResource(R.string.hyper_pet_name)) },
+                                    placeholder = { Text(stringResource(R.string.hyper_pet_card_title)) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
                                 )
                             }
                         }

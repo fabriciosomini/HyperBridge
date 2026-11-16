@@ -892,6 +892,8 @@ class AppPreferences internal constructor(
     private val PERMANENT_ISLAND_ON_LOCKSCREEN = "permanent_island_on_lockscreen"
     private val PERMANENT_ISLAND_NEXT_ALARM = "permanent_island_next_alarm"
     private val PERMANENT_ISLAND_WEATHER = "permanent_island_weather"
+    private val PERMANENT_ISLAND_HYPER_PET = "permanent_island_hyper_pet"
+    private val HYPER_PET_NAME = "hyper_pet_name"
 
     val isPermanentIslandEnabledFlow: Flow<Boolean> = dao.getSettingFlow(SHOW_PERMANENT_ISLAND)
         .map { it?.toBoolean() ?: false }
@@ -910,6 +912,12 @@ class AppPreferences internal constructor(
 
     val permanentIslandWeatherFlow: Flow<Boolean> = dao.getSettingFlow(PERMANENT_ISLAND_WEATHER)
         .map { it?.toBoolean() ?: false }
+
+    val permanentIslandHyperPetFlow: Flow<Boolean> = dao.getSettingFlow(PERMANENT_ISLAND_HYPER_PET)
+        .map { it?.toBoolean() ?: false }
+
+    /** Empty until the user names the pet. */
+    val hyperPetNameFlow: Flow<String> = dao.getSettingFlow(HYPER_PET_NAME).map { it.orEmpty() }
 
     suspend fun setPermanentIslandEnabled(value: Boolean) {
         save(SHOW_PERMANENT_ISLAND, value.toString())
@@ -933,6 +941,14 @@ class AppPreferences internal constructor(
 
     suspend fun setPermanentIslandWeather(value: Boolean) {
         save(PERMANENT_ISLAND_WEATHER, value.toString())
+    }
+
+    suspend fun setPermanentIslandHyperPet(value: Boolean) {
+        save(PERMANENT_ISLAND_HYPER_PET, value.toString())
+    }
+
+    suspend fun setHyperPetName(value: String) {
+        save(HYPER_PET_NAME, value)
     }
 
     fun hidePermanentIslandLandscapeSync(): Boolean {
