@@ -72,6 +72,11 @@ class PermanentIslandManager(
     private var showOnLockscreen = false
     private var showNextAlarm = false
     private var showWeather = false
+    private var showHyperPet = false
+    // The clip the pet last played; every dispatch restarts the video, so each plays another.
+    private var hyperPetClip: Int? = null
+    // Posts the pet again when its clip ends. Active only while the pet is what the pill shows.
+    private var hyperPetJob: Job? = null
     private var rotationJob: Job? = null
     // Set by the card's "Next" button: swaps which minutes show the alarm and which the weather.
     private var rotationFlipped = false
@@ -263,6 +268,21 @@ class PermanentIslandManager(
             }
         }
         scope.launch {
+            preferences.permanentIslandHyperPetFlow.collectLatest { show ->
+                synchronized(this@PermanentIslandManager) {
+                    if (showHyperPet != show) {
+                        showHyperPet = show
+                        // The plugin binds the left slot's renderer (bitmap or video) when the
+                        // island is added, so swap it with a fresh add.
+                        if (isIslandActive) {
+                            removePermanentIsland()
+                            scheduleDispatchLocked()
+                        }
+                    }
+                }
+            }
+        }
+        scope.launch {
             preferences.permanentIslandOnLockscreenFlow.collectLatest { show ->
                 synchronized(this@PermanentIslandManager) {
                     if (showOnLockscreen != show) {
@@ -338,6 +358,11 @@ class PermanentIslandManager(
         hasNativeIsland = hasNative
         val shouldShow = desiredActive()
         val isLandscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        if (shouldShow && isIslandPresent && refresh && hyperPetJob?.isActive == true) {
+            // The pet is re-posted every clip anyway; re-asserting now would cut its clip short.
+            isIslandActive = true
+            return
+        }
         if (shouldShow && isIslandPresent && refresh) {
             // Present but maybe not visible: re-assert in place (no remove first, so no
             // rapid cancel->post to swallow). Same id + content updates the residual island.
@@ -484,10 +509,18 @@ class PermanentIslandManager(
             val resourceBundle = builder.buildResourceBundle()
             // Property 0 keeps HyperOS drawing the pill over the keyguard; 1 is the toolkit default.
             val islandProperty = if (showOnLockscreen) KEYGUARD_ISLAND_PROPERTY else 1
+            val jsonParam = builder.buildJsonParam(HyperIslandProtocolOptions(islandProperty = islandProperty))
+            // The pet lives on the plain pill: the alarm and the weather keep their own icons.
             val data = HyperIslandData(
                 resourceBundle,
-                builder.buildJsonParam(HyperIslandProtocolOptions(islandProperty = islandProperty))
+                if (showHyperPet && content == null) {
+                    val hour = java.time.LocalTime.now().hour
+                    val clip = HyperPetPill.nextClip(HyperPetPill.clipsAt(hour), hyperPetClip).also { hyperPetClip = it }
+                    Log.d(TAG, "Hyper Pet clip: ${context.resources.getResourceEntryName(clip)}")
+                    HyperPetPill.withPet(jsonParam, HyperPetPill.videoUri(context.packageName, clip))
+                } else jsonParam
             )
+            scheduleNextHyperPetClipLocked(showHyperPet && content == null)
 
             val notifBuilder = NotificationCompat.Builder(context, "hyper_bridge_notification_channel")
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
@@ -515,6 +548,21 @@ class PermanentIslandManager(
             isPosted = true
         } catch (e: Exception) {
             Log.e(TAG, "Error dispatching permanent island", e)
+        }
+    }
+
+    // Called with the lock held, from a dispatch: the clip that was just posted ends in CLIP_MS.
+    // With the screen off nothing is posted (no one would see it); the refresh on SCREEN_ON then
+    // finds the job done and posts the pet again.
+    private fun scheduleNextHyperPetClipLocked(petShown: Boolean) {
+        hyperPetJob?.cancel()
+        hyperPetJob = if (!petShown) null else scope.launch {
+            delay(HyperPetPill.CLIP_MS.milliseconds)
+            synchronized(this@PermanentIslandManager) {
+                if (isIslandActive && isPosted && pendingDispatchJob == null && powerManager?.isInteractive != false) {
+                    dispatchPermanentIsland()
+                }
+            }
         }
     }
 
@@ -551,6 +599,8 @@ class PermanentIslandManager(
 
     private fun removePermanentIsland() {
         isPosted = false
+        hyperPetJob?.cancel()
+        hyperPetJob = null
         addOnScreenOn = false
         try {
             Log.d(TAG, "Removing permanent island")

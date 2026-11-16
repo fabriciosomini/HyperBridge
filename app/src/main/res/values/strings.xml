@@ -65,6 +65,8 @@
     <string name="permanent_island_weather">Show Weather</string>
     <string name="permanent_island_weather_desc">Show the current weather on the capsule, for your approximate location (from Open-Meteo). With Show Next Alarm on, the two take turns every minute.</string>
     <string name="permanent_island_next">Next</string>
+    <string name="permanent_island_hyper_pet">Show Hyper Pet</string>
+    <string name="permanent_island_hyper_pet_desc">Keep an animated pet on the capsule whenever it has nothing else to show.</string>
     <string name="weather_clear">Clear</string>
     <string name="weather_mainly_clear">Mainly clear</string>
     <string name="weather_partly_cloudy">Partly cloudy</string>

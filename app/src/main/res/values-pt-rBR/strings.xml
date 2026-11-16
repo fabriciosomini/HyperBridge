@@ -53,6 +53,8 @@
     <string name="permanent_island_weather">Mostrar Clima</string>
     <string name="permanent_island_weather_desc">Mostra o clima atual na cápsula, para a sua localização aproximada (via Open-Meteo). Com Mostrar Próximo Alarme ligado, os dois se alternam a cada minuto.</string>
     <string name="permanent_island_next">Próximo</string>
+    <string name="permanent_island_hyper_pet">Mostrar Hyper Pet</string>
+    <string name="permanent_island_hyper_pet_desc">Mantém um pet animado na cápsula sempre que ela não tiver mais nada para mostrar.</string>
     <string name="weather_clear">Limpo</string>
     <string name="weather_mainly_clear">Predominantemente limpo</string>
     <string name="weather_partly_cloudy">Parcialmente nublado</string>

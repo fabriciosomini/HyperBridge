@@ -57,6 +57,7 @@ fun PermanentIslandConfigScreen(
     val showOnLockscreen by prefs.permanentIslandOnLockscreenFlow.collectAsState(initial = false)
     val showNextAlarm by prefs.permanentIslandNextAlarmFlow.collectAsState(initial = false)
     val showWeather by prefs.permanentIslandWeatherFlow.collectAsState(initial = false)
+    val showHyperPet by prefs.permanentIslandHyperPetFlow.collectAsState(initial = false)
     // Weather comes from Open-Meteo at the approximate location, so turning it on asks for that.
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -82,6 +83,12 @@ fun PermanentIslandConfigScreen(
         showOnLockscreen = showOnLockscreen,
         showNextAlarm = showNextAlarm,
         showWeather = showWeather,
+        showHyperPet = showHyperPet,
+        onShowHyperPetChange = { show ->
+            scope.launch {
+                prefs.setPermanentIslandHyperPet(show)
+            }
+        },
         onEnabledChange = { checked ->
             scope.launch {
                 prefs.setPermanentIslandEnabled(checked)
@@ -135,6 +142,8 @@ fun PermanentIslandConfigContent(
     onShowNextAlarmChange: (Boolean) -> Unit = {},
     showWeather: Boolean = false,
     onShowWeatherChange: (Boolean) -> Unit = {},
+    showHyperPet: Boolean = false,
+    onShowHyperPetChange: (Boolean) -> Unit = {},
     onBack: () -> Unit
 ) {
     var sliderValue by androidx.compose.runtime.remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
@@ -302,6 +311,29 @@ fun PermanentIslandConfigContent(
                                 Switch(
                                     checked = showWeather,
                                     onCheckedChange = onShowWeatherChange
+                                )
+                            }
+                            Spacer(Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.permanent_island_hyper_pet),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.permanent_island_hyper_pet_desc),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = showHyperPet,
+                                    onCheckedChange = onShowHyperPetChange
                                 )
                             }
                         }
